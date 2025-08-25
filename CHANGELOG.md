@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.0.7](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-v0.0.6...dioxus-provider-v0.0.7) - 2025-08-25
+
+### <!-- 3 -->Other
+
+- Bump actions/checkout from 4 to 5
+- small refactor
+- bump to alpha 3
+- Refactor todo app filter button props and input signal
+- Update todo_app.rs
+- Tracking mutation state and showing it
+- Refactor filter signal variable in FilterButton
+- Add comprehensive todo app example with persistence
+- Refactor string formatting to use inline syntax
+- Improve param_utils.rs documentation for IntoProviderParam
+- Remove ProviderState from cache.rs and update re-exports
+- more cllippy fixes
+- some clippy fixes
+- Replace tokio sleep with platform sleep in example
+- Revamp examples section in README
+- Add combinator methods to ProviderState and example
+- Add detailed Rust doc comments to cache module
+- Add module-level docs for cache management
+- Refactor provider trait bounds into reusable traits
+- Move IntoProviderParam trait to param_utils module
+- Extract ProviderState to separate module and re-export
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
