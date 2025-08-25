@@ -8,7 +8,7 @@ edition = "2021"
 
 [dependencies]
 dioxus = { version = "0.7.0-alpha.3", features = ["fullstack"] }
-dioxus-provider = { version = "0.0.6", path = "../../dioxus-provider" }
+dioxus-provider = { version = "0.0.7", path = "../../dioxus-provider" }
 
 [features]
 default = ["web"]
