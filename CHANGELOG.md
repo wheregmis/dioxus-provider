@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+###
+- Updated dioxus to v0.7-rc.0
 ### Added
 - `ProviderState` now supports combinator methods: `map`, `map_err`, and `and_then` for ergonomic state transformations in provider logic and UI code.
 - Expanded documentation for all cache and provider state APIs.
