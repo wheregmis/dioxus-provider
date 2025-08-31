@@ -12,13 +12,13 @@ keywords = ["dioxus", "data-fetching", "caching", "providers", "swr"]
 categories = ["gui", "asynchronous", "web-programming"]
 
 [workspace]
-members = [".", "dioxus-provider-macros", "fullstack-example"]
+members = [".", "dioxus-provider-macros"]
 
 [features]
 default = []
 
 [dependencies]
-dioxus = { version = "0.7.0-alpha.3", default-features = false, features = [
+dioxus = { version = "0.7.0-rc.0", default-features = false, features = [
     "macro",
     "hooks",
     "signals",
@@ -59,7 +59,7 @@ serde_json = { version = "1.0.142", features = ["std"] }
 dioxus = { version = "0.7.0-alpha.3", features = ["desktop"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-# Web-only dependencies for examples  
+# Web-only dependencies for examples
 dioxus = { version = "0.7.0-alpha.3", features = ["web"] }
 
 
