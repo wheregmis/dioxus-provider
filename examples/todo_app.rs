@@ -154,15 +154,46 @@ pub async fn delete_todo(id: u64) -> Result<Vec<Todo>, TodoError> {
 pub fn TodoInput() -> Element {
     let mut input = use_signal(String::new);
     let (mutation_state, add) = use_mutation(add_todo());
+    let cache = use_provider_cache();
+    let mut temp_id_counter = use_signal(|| 0u64);
 
-    let mut on_submit = move |_| {
-        let title = input.read().trim().to_string();
-        if !title.is_empty() {
-            add(title.clone());
-            input.set(String::new());
+    let mut on_submit = {
+        let cache = cache.clone();
+        move |_| {
+            let title = input.read().trim().to_string();
+            if !title.is_empty() {
+                // Optimistic update
+                let current_id = *temp_id_counter.read();
+                let temp_id = u64::MAX - current_id;
+                temp_id_counter.set(current_id + 1);
+
+                let optimistic_todo = Todo {
+                    id: temp_id,
+                    title: title.clone(),
+                    completed: false,
+                };
+
+                let cache_key = provider_cache_key_simple(load_todos());
+
+                // Get current todos from cache, or an empty vec if not present/error
+                let mut current_todos = cache
+                    .get::<Result<Vec<Todo>, TodoError>>(&cache_key)
+                    .and_then(|res| res.ok())
+                    .unwrap_or_default();
+
+                // Add optimistic todo and update cache
+                current_todos.push(optimistic_todo);
+                cache.set(cache_key.clone(), Ok::<_, TodoError>(current_todos));
+
+                // Trigger mutation
+                add(title.clone());
+                input.set(String::new());
+            }
         }
     };
+
     let on_keydown = {
+        let mut on_submit = on_submit.clone();
         let mut on_submit = on_submit.clone();
         move |e: Event<KeyboardData>| {
             if e.key() == Key::Enter {
@@ -171,9 +202,26 @@ pub fn TodoInput() -> Element {
         }
     };
 
+    // Effect for rollback on error
+    use_effect({
+        let cache = cache.clone();
+        move || {
+            if let MutationState::Error(_) = &*mutation_state.read() {
+                let cache_key = provider_cache_key_simple(load_todos());
+                if let Some(Ok(mut todos)) = cache.get::<Result<Vec<Todo>, TodoError>>(&cache_key) {
+                    // Remove the last optimistic todo
+                    let last_temp_id = u64::MAX - (*temp_id_counter.read() - 1);
+                    todos.retain(|t| t.id != last_temp_id);
+                    cache.set(cache_key, Ok::<_, TodoError>(todos));
+                }
+            }
+        }
+    });
+
     rsx! {
         form {
             class: "flex gap-2 mb-4",
+            onsubmit: move |e| e.stop_propagation(),
             input {
                 r#type: "text",
                 value: "{input}",
@@ -183,7 +231,11 @@ pub fn TodoInput() -> Element {
                 autofocus: true,
                 class: "flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white text-gray-900 shadow-sm transition-all"
             }
-            button { onclick: move |_| on_submit(()), class: "px-4 py-2 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all", "Add" }
+            button {
+                onclick: move |_| on_submit(()),
+                class: "px-4 py-2 bg-blue-600 text-white font-semibold rounded shadow hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all",
+                "Add"
+            }
             match &*mutation_state.read() {
                 MutationState::Loading => rsx!(span { class: "ml-2 text-blue-500 animate-pulse", "Adding..." }),
                 MutationState::Error(err) => rsx!(span { class: "ml-2 text-red-500", "{err}" }),

@@ -167,7 +167,9 @@ impl From<RenderError> for dioxus_core::RenderError {
 }
 
 // Update SuspenseSignalExt to use ProviderState
-impl<T: Clone, E: Clone> SuspenseSignalExt<T, E> for Signal<ProviderState<T, E>> {
+impl<T: Clone + 'static, E: Clone + 'static> SuspenseSignalExt<T, E>
+    for Signal<ProviderState<T, E>>
+{
     fn suspend(&self) -> Result<Result<T, E>, RenderError> {
         match &*self.read() {
             ProviderState::Loading { task } => {
