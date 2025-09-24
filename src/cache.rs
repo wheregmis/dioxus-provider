@@ -4,7 +4,6 @@
 //! - **Expiration**: Entries are removed after a configurable TTL.
 //! - **Staleness (SWR)**: Entries can be marked stale and revalidated in the background.
 //! - **LRU Eviction**: Least-recently-used entries are evicted to maintain a size limit.
-//! - **Reference Counting**: Tracks active users of each entry for safe cleanup.
 //! - **Access/Usage Stats**: Provides statistics for cache introspection and tuning.
 //!
 //! ## Example
@@ -35,12 +34,11 @@ use std::time::Instant;
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
 
-/// A type-erased cache entry for storing provider results with timestamp and reference counting
+/// A type-erased cache entry for storing provider results with timestamp and access tracking
 #[derive(Clone)]
 pub struct CacheEntry {
     data: Arc<dyn Any + Send + Sync>,
     cached_at: Arc<Mutex<Instant>>,
-    reference_count: Arc<AtomicU32>,
     last_accessed: Arc<Mutex<Instant>>,
     access_count: Arc<AtomicU32>,
 }
@@ -60,7 +58,6 @@ impl CacheEntry {
         Self {
             data: Arc::new(data),
             cached_at: Arc::new(Mutex::new(now)),
-            reference_count: Arc::new(AtomicU32::new(0)),
             last_accessed: Arc::new(Mutex::new(now)),
             access_count: Arc::new(AtomicU32::new(0)),
         }
@@ -137,45 +134,6 @@ impl CacheEntry {
         } else {
             false
         }
-    }
-
-    /// Increments the reference count for the cache entry.
-    ///
-    /// # Arguments
-    ///
-    /// * `&self` - A reference to the `CacheEntry`.
-    ///
-    /// # Side Effects
-    ///
-    /// Increments the `reference_count` by 1.
-    pub fn add_reference(&self) {
-        self.reference_count.fetch_add(1, Ordering::SeqCst);
-    }
-
-    /// Decrements the reference count for the cache entry.
-    ///
-    /// # Arguments
-    ///
-    /// * `&self` - A reference to the `CacheEntry`.
-    ///
-    /// # Side Effects
-    ///
-    /// Decrements the `reference_count` by 1.
-    pub fn remove_reference(&self) {
-        self.reference_count.fetch_sub(1, Ordering::SeqCst);
-    }
-
-    /// Gets the current reference count for the cache entry.
-    ///
-    /// # Arguments
-    ///
-    /// * `&self` - A reference to the `CacheEntry`.
-    ///
-    /// # Returns
-    ///
-    /// The current reference count as a `u32`.
-    pub fn reference_count(&self) -> u32 {
-        self.reference_count.load(Ordering::SeqCst)
     }
 
     /// Gets the current access count for the cache entry.
@@ -354,10 +312,10 @@ impl ProviderCache {
         let entry = cache_guard.get(key)?;
 
         // Check if expired first
-        if let Some(exp_duration) = expiration {
-            if entry.is_expired(exp_duration) {
-                return None;
-            }
+        if let Some(exp_duration) = expiration
+            && entry.is_expired(exp_duration)
+        {
+            return None;
         }
 
         // Get the data
@@ -390,17 +348,16 @@ impl ProviderCache {
     /// Updates the `cached_at` timestamp if the value was updated.
     pub fn set<T: Clone + Send + Sync + PartialEq + 'static>(&self, key: String, value: T) -> bool {
         if let Ok(mut cache) = self.cache.lock() {
-            if let Some(existing_entry) = cache.get_mut(&key) {
-                if let Some(existing_value) = existing_entry.get::<T>() {
-                    if existing_value == value {
-                        existing_entry.refresh_timestamp();
-                        debug!(
-                            "⏸️ [CACHE-STORE] Value unchanged for key: {}, refreshing timestamp",
-                            key
-                        );
-                        return false;
-                    }
-                }
+            if let Some(existing_entry) = cache.get_mut(&key)
+                && let Some(existing_value) = existing_entry.get::<T>()
+                && existing_value == value
+            {
+                existing_entry.refresh_timestamp();
+                debug!(
+                    "⏸️ [CACHE-STORE] Value unchanged for key: {}, refreshing timestamp",
+                    key
+                );
+                return false;
             }
             cache.insert(key.clone(), CacheEntry::new(value));
             debug!("📊 [CACHE-STORE] Stored data for key: {}", key);
@@ -501,8 +458,7 @@ impl ProviderCache {
         if let Ok(mut cache) = self.cache.lock() {
             let initial_size = cache.len();
             cache.retain(|key, entry| {
-                let should_keep =
-                    !entry.is_unused_for(unused_threshold) || entry.reference_count() > 0;
+                let should_keep = !entry.is_unused_for(unused_threshold);
                 if !should_keep {
                     debug!("🧹 [CACHE-CLEANUP] Removing unused entry: {}", key);
                 }
@@ -603,12 +559,10 @@ impl ProviderCache {
         if let Ok(cache) = self.cache.lock() {
             let mut total_age = Duration::ZERO;
             let mut total_accesses = 0;
-            let mut total_references = 0;
 
             for entry in cache.values() {
                 total_age += entry.age();
                 total_accesses += entry.access_count();
-                total_references += entry.reference_count();
             }
 
             let entry_count = cache.len();
@@ -621,7 +575,7 @@ impl ProviderCache {
             CacheStats {
                 entry_count,
                 total_accesses,
-                total_references,
+                total_references: 0, // No longer tracking references
                 avg_age,
                 total_size_bytes: entry_count * 1024, // Rough estimate
             }
