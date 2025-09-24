@@ -1,19 +1,23 @@
 //! Minimal Optimistic Mutations Example for dioxus-provider
 //!
-//! This demonstrates the NEW optimistic mutations system:
+//! This demonstrates the ZERO-DUPLICATION optimistic mutations system:
 //!
 //! ✅ INSTANT UI updates - no loading states, no waiting
-//! ✅ Automatic rollback on failure
-//! ✅ Clean, simple API - just implement optimistic_updates()
+//! ✅ Automatic rollback on failure  
+//! ✅ ZERO data duplication - both optimistic updates AND mutations work with cached data
+//! ✅ EFFICIENT API - library provides current cached data automatically
 //! ✅ Library handles all the complexity
 //!
 //! ## How it works:
-//! 1. User clicks delete
-//! 2. Library immediately applies optimistic_updates() to cache
-//! 3. UI updates instantly (item disappears)
-//! 4. Server mutation runs in background
-//! 5. If successful: nothing changes (optimistic result was correct)
-//! 6. If failed: library rolls back + shows error
+//! 1. Provider loads initial data (only place data is defined!)
+//! 2. User clicks delete
+//! 3. Library gets current cached data and passes it to:
+//!    - optimistic_updates_with_current() → immediate UI update
+//!    - mutate_with_current() → server mutation (also works with current data!)
+//! 4. UI updates instantly (item disappears)
+//! 5. Server mutation runs in background (using same current data)
+//! 6. If successful: nothing changes (optimistic result was correct)
+//! 7. If failed: library rolls back + shows error
 
 use dioxus::prelude::*;
 use dioxus_provider::prelude::*;
@@ -89,69 +93,72 @@ impl Mutation<u64> for OptimisticDeleteMutation {
     type Output = Vec<Item>;
     type Error = ItemError;
 
-    async fn mutate(&self, id: u64) -> Result<Self::Output, Self::Error> {
-        // Simulate the actual mutation
+    async fn mutate(&self, _id: u64) -> Result<Self::Output, Self::Error> {
+        // Fallback implementation - should not be called in practice
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        Err(ItemError::Other("No current data available".to_string()))
+    }
+
+    async fn mutate_with_current(
+        &self,
+        id: u64,
+        current_data: Option<&Result<Self::Output, Self::Error>>,
+    ) -> Result<Self::Output, Self::Error> {
+        // Simulate network delay
         tokio::time::sleep(Duration::from_millis(1000)).await;
 
-        // Simulate the deletion and return new list
-        let items = vec![
-            Item {
-                id: 1,
-                name: "Item 1".to_string(),
-            },
-            Item {
-                id: 2,
-                name: "Item 2".to_string(),
-            },
-            Item {
-                id: 3,
-                name: "Item 3".to_string(),
-            },
-        ];
+        // Work with the actual current cached data!
+        if let Some(Ok(current_items)) = current_data {
+            // Remove the item from current state
+            let updated_items: Vec<Item> = current_items
+                .iter()
+                .filter(|item| item.id != id)
+                .cloned()
+                .collect();
 
-        let filtered: Vec<Item> = items.into_iter().filter(|item| item.id != id).collect();
-        Ok(filtered)
+            // Simulate potential server failure (uncomment to test rollback)
+            // if id == 2 { return Err(ItemError::Other("Server error".to_string())); }
+
+            Ok(updated_items)
+        } else {
+            Err(ItemError::Other("No current data to work with".to_string()))
+        }
     }
 
     fn invalidates(&self) -> Vec<String> {
         vec![provider_cache_key_simple(load_items())]
     }
 
-    fn optimistic_updates(&self, input: &u64) -> Vec<(String, Result<Self::Output, Self::Error>)> {
-        // This is the NEW way to do optimistic mutations!
-        // Return the expected result immediately for instant UI updates
+    fn optimistic_updates_with_current(
+        &self,
+        input: &u64,
+        current_data: Option<&Result<Self::Output, Self::Error>>,
+    ) -> Vec<(String, Result<Self::Output, Self::Error>)> {
+        // This is the EFFICIENT way to do optimistic mutations!
+        // We get the current cached data and modify it instead of duplicating
         let id_to_delete = *input;
 
-        // Calculate the optimistic result (items without the deleted one)
-        let current_items = vec![
-            Item {
-                id: 1,
-                name: "Item 1".to_string(),
-            },
-            Item {
-                id: 2,
-                name: "Item 2".to_string(),
-            },
-            Item {
-                id: 3,
-                name: "Item 3".to_string(),
-            },
-        ];
+        if let Some(Ok(current_items)) = current_data {
+            // Filter out the deleted item from the current data
+            let optimistic_result: Vec<Item> = current_items
+                .iter()
+                .filter(|item| item.id != id_to_delete)
+                .cloned()
+                .collect();
 
-        let optimistic_result: Vec<Item> = current_items
-            .into_iter()
-            .filter(|item| item.id != id_to_delete)
-            .collect();
-
-        vec![(
-            provider_cache_key_simple(load_items()),
-            Ok(optimistic_result),
-        )]
+            vec![(
+                provider_cache_key_simple(load_items()),
+                Ok(optimistic_result),
+            )]
+        } else {
+            // No current data available, return empty (could fallback to invalidation)
+            vec![]
+        }
     }
 }
 
 /// Item component with delete button  
-/// This demonstrates the NEW simplified pattern using the enhanced library
+/// Notice: NO data duplication anywhere! The mutation works with cached data just like optimistic updates
 #[component]
 pub fn ItemCard(item: Item) -> Element {
     // Use the optimistic mutation hook - the library handles everything automatically!

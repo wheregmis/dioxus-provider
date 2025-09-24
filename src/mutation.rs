@@ -104,6 +104,18 @@ where
     /// Execute the mutation with the given input
     fn mutate(&self, input: Input) -> impl Future<Output = Result<Self::Output, Self::Error>>;
 
+    /// Execute the mutation with access to current cached data
+    /// This allows mutations to work with existing state instead of redefining data
+    /// If not implemented, falls back to the simple mutate method
+    fn mutate_with_current(
+        &self,
+        input: Input,
+        _current_data: Option<&Result<Self::Output, Self::Error>>,
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> {
+        // Default implementation falls back to simple mutate
+        self.mutate(input)
+    }
+
     /// Get a unique identifier for this mutation type
     fn id(&self) -> String {
         std::any::type_name::<Self>().to_string()
@@ -124,6 +136,18 @@ where
         _input: &Input,
     ) -> Vec<(String, Result<Self::Output, Self::Error>)> {
         Vec::new()
+    }
+
+    /// Compute optimistic updates with access to current cached data
+    /// This is more efficient as it allows mutations to work with existing data
+    /// instead of duplicating data structures
+    fn optimistic_updates_with_current(
+        &self,
+        _input: &Input,
+        _current_data: Option<&Result<Self::Output, Self::Error>>,
+    ) -> Vec<(String, Result<Self::Output, Self::Error>)> {
+        // Fallback to the simple method if not overridden
+        self.optimistic_updates(_input)
     }
 }
 
@@ -198,7 +222,18 @@ where
 
                 debug!("🔄 [MUTATION] Starting mutation: {}", mutation.id());
 
-                match mutation.mutate(input).await {
+                // Get current data for the mutation
+                let cache_keys_to_check: Vec<String> = mutation.invalidates();
+                let mutation_current_data = if !cache_keys_to_check.is_empty() {
+                    cache.get::<Result<M::Output, M::Error>>(&cache_keys_to_check[0])
+                } else {
+                    None
+                };
+
+                match mutation
+                    .mutate_with_current(input, mutation_current_data.as_ref())
+                    .await
+                {
                     Ok(result) => {
                         debug!("✅ [MUTATION] Mutation succeeded: {}", mutation.id());
 
@@ -280,7 +315,23 @@ where
 
             spawn(async move {
                 // Apply optimistic updates for immediate feedback
-                let optimistic_updates = mutation.optimistic_updates(&input);
+                // First, try the enhanced method with current data
+                let cache_keys_to_check: Vec<String> = mutation.invalidates();
+                let mut optimistic_updates = Vec::new();
+
+                // For each cache key, get current data and compute optimistic updates
+                for cache_key in &cache_keys_to_check {
+                    let current_data = cache.get::<Result<M::Output, M::Error>>(cache_key);
+                    let updates =
+                        mutation.optimistic_updates_with_current(&input, current_data.as_ref());
+                    optimistic_updates.extend(updates);
+                }
+
+                // If no updates from the enhanced method, fallback to simple method
+                if optimistic_updates.is_empty() {
+                    optimistic_updates = mutation.optimistic_updates(&input);
+                }
+
                 if !optimistic_updates.is_empty() {
                     debug!(
                         "⚡ [OPTIMISTIC] Optimistically updating {} cache entries",
@@ -299,7 +350,17 @@ where
                     mutation.id()
                 );
 
-                match mutation.mutate(input).await {
+                // Get current data for the mutation
+                let mutation_current_data = if !cache_keys_to_check.is_empty() {
+                    cache.get::<Result<M::Output, M::Error>>(&cache_keys_to_check[0])
+                } else {
+                    None
+                };
+
+                match mutation
+                    .mutate_with_current(input, mutation_current_data.as_ref())
+                    .await
+                {
                     Ok(result) => {
                         debug!(
                             "✅ [MUTATION] Optimistic mutation succeeded: {}",
