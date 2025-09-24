@@ -14,8 +14,6 @@ categories = ["gui", "asynchronous", "web-programming"]
 [workspace]
 members = [".", "dioxus-provider-macros"]
 
-[features]
-default = []
 
 [dependencies]
 dioxus = { version = "0.7.0-rc.0", default-features = false, features = [
@@ -27,8 +25,8 @@ dioxus = { version = "0.7.0-rc.0", default-features = false, features = [
 dioxus-provider-macros = { version = "0.1.2", path = "./dioxus-provider-macros" }
 futures = "0.3"
 tracing = "0.1.41"
-thiserror = "2.0.12"
-serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0.16"
+serde = { version = "1.0.226", features = ["derive"] }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -44,15 +42,15 @@ tokio = { version = "1.47.1", features = [
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WASM-compatible tokio features only
 tokio = { version = "1.45.1", features = ["sync", "time", "rt", "macros"] }
-wasmtimer = "0.4.1"
+wasmtimer = "0.4.3"
 web-time = "1.1.0"
 
 [dev-dependencies]
 tokio = { version = "1.45.1", features = ["time"] }
-chrono = { version = "0.4", features = ["std"] }
+chrono = { version = "0.4.42", features = ["std"] }
 env_logger = "0.11"
-tracing-subscriber = "0.3"
-serde_json = { version = "1.0.142", features = ["std"] }
+tracing-subscriber = "0.3.20"
+serde_json = { version = "1.0.145", features = ["std"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # Desktop-only dependencies for examples

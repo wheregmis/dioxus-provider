@@ -99,7 +99,7 @@ where
     /// The type of data returned on successful mutation
     type Output: Clone + PartialEq + Send + Sync + 'static;
     /// The type of error returned on mutation failure
-    type Error: Clone + Send + Sync + 'static;
+    type Error: Clone + PartialEq + Send + Sync + 'static;
 
     /// Execute the mutation with the given input
     fn mutate(&self, input: Input) -> impl Future<Output = Result<Self::Output, Self::Error>>;
@@ -115,9 +115,14 @@ where
         Vec::new()
     }
 
-    /// Get cache keys that should be optimistically updated (simple invalidation)
-    /// Override this to enable optimistic cache invalidation
-    fn optimistic_invalidate(&self, _input: &Input) -> Vec<String> {
+    /// Provide optimistic cache updates for immediate UI feedback
+    /// Returns a list of (cache_key, optimistic_result) pairs to update the cache with
+    /// This allows the UI to update immediately with the expected result
+    /// The Result should contain the optimistic success value
+    fn optimistic_updates(
+        &self,
+        _input: &Input,
+    ) -> Vec<(String, Result<Self::Output, Self::Error>)> {
         Vec::new()
     }
 }
@@ -274,15 +279,15 @@ where
             let input = input.clone();
 
             spawn(async move {
-                // Apply optimistic invalidation for immediate feedback
-                let optimistic_keys = mutation.optimistic_invalidate(&input);
-                if !optimistic_keys.is_empty() {
+                // Apply optimistic updates for immediate feedback
+                let optimistic_updates = mutation.optimistic_updates(&input);
+                if !optimistic_updates.is_empty() {
                     debug!(
-                        "⚡ [OPTIMISTIC] Optimistically invalidating {} cache entries",
-                        optimistic_keys.len()
+                        "⚡ [OPTIMISTIC] Optimistically updating {} cache entries",
+                        optimistic_updates.len()
                     );
-                    for cache_key in &optimistic_keys {
-                        cache.invalidate(cache_key);
+                    for (cache_key, optimistic_result) in &optimistic_updates {
+                        cache.set(cache_key.clone(), optimistic_result.clone());
                         refresh_registry.trigger_refresh(cache_key);
                     }
                 }
@@ -316,10 +321,10 @@ where
                             mutation.id()
                         );
 
-                        // Re-invalidate the same optimistic keys to trigger refetch and restore state
-                        for cache_key in &optimistic_keys {
+                        // Rollback optimistic updates by invalidating cache to trigger refetch
+                        for (cache_key, _) in &optimistic_updates {
                             debug!(
-                                "🔄 [ROLLBACK] Re-invalidating optimistic cache key after failure: {}",
+                                "🔄 [ROLLBACK] Rolling back optimistic update for cache key: {}",
                                 cache_key
                             );
                             cache.invalidate(cache_key);
