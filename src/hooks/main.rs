@@ -45,7 +45,10 @@ use crate::types::{ProviderErrorBounds, ProviderOutputBounds, ProviderParamBound
 // Import helper functions from sibling modules
 use super::cache_mgmt::setup_intelligent_cache_management;
 use super::swr::check_and_handle_swr_core;
-use super::tasks::{setup_cache_expiration_task_core, setup_interval_task_core, setup_stale_check_task_core, check_and_handle_cache_expiration};
+use super::tasks::{
+    check_and_handle_cache_expiration, setup_cache_expiration_task_core, setup_interval_task_core,
+    setup_stale_check_task_core,
+};
 
 pub use crate::provider_state::ProviderState;
 

@@ -66,7 +66,7 @@ pub trait IntoProviderParam {
 /// as provider parameters without requiring tuple wrappers.
 pub mod sealed {
     pub trait DirectParam {}
-    
+
     // Implement for common primitive types
     impl DirectParam for u8 {}
     impl DirectParam for u16 {}

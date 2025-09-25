@@ -4,11 +4,7 @@ use dioxus::prelude::*;
 use std::time::Duration;
 use tracing::debug;
 
-use crate::{
-    cache::ProviderCache,
-    refresh::RefreshRegistry,
-    types::ProviderParamBounds,
-};
+use crate::{cache::ProviderCache, refresh::RefreshRegistry, types::ProviderParamBounds};
 
 use super::Provider;
 
