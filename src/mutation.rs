@@ -392,6 +392,7 @@ where
             let refresh_registry = refresh_registry.clone();
             let input = input.clone();
             let mut ui_state = state;
+            ui_state.set(MutationState::Loading);
 
             // Collect optimistic updates in the component scope so they apply immediately.
             let cache_keys_to_check: Vec<String> = mutation.invalidates();
@@ -418,8 +419,6 @@ where
                     refresh_registry.trigger_refresh(cache_key);
                 }
             }
-
-            ui_state.set(MutationState::Loading);
 
             let optimistic_updates_for_rollback = optimistic_updates.clone();
             let (result_tx, result_rx) = oneshot::channel::<Result<M::Output, M::Error>>();

@@ -154,9 +154,6 @@ pub async fn toggle_todo(
     sleep(Duration::from_millis(250)).await;
 
     if let Some(current) = ctx.cloned_success() {
-        if current.iter().all(|t| t.id != id) {
-            return Err(TodoError::NotFound);
-        }
         save_todos_to_file_async(&current).await?;
         Ok(current)
     } else {
@@ -188,9 +185,6 @@ pub async fn update_todo(
 
     let id = payload.id;
     if let Some(current) = ctx.cloned_success() {
-        if current.iter().all(|t| t.id != id) {
-            return Err(TodoError::NotFound);
-        }
         save_todos_to_file_async(&current).await?;
         Ok(current)
     } else {
@@ -219,18 +213,11 @@ pub async fn delete_todo(
     sleep(Duration::from_millis(200)).await;
 
     if let Some(current) = ctx.cloned_success() {
-        if current.iter().all(|t| t.id != id) {
-            return Err(TodoError::NotFound);
-        }
         save_todos_to_file_async(&current).await?;
         Ok(current)
     } else {
         let mut todos = load_todos_from_file_async().await?;
-        let original_len = todos.len();
         todos.retain(|t| t.id != id);
-        if todos.len() == original_len {
-            return Err(TodoError::NotFound);
-        }
         save_todos_to_file_async(&todos).await?;
         Ok(todos)
     }
