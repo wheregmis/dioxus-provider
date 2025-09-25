@@ -43,6 +43,9 @@ pub enum ItemError {
 /// Provider for loading items
 #[provider]
 pub async fn load_items() -> Result<Vec<Item>, ItemError> {
+    // Add some logging to understand when this reloads
+    println!("🔄 [LOAD_ITEMS] Provider is executing - returning fresh data");
+
     // Return some mock data
     Ok(vec![
         Item {
@@ -105,22 +108,59 @@ impl Mutation<u64> for OptimisticDeleteMutation {
         current_data: Option<&Result<Self::Output, Self::Error>>,
     ) -> Result<Self::Output, Self::Error> {
         // Simulate network delay
+        println!("🌐 [MUTATION] Starting server mutation for item {}", id);
+
+        // Add specific debugging for item 3
+        if id == 3 {
+            println!("⚠️ [DEBUG] Processing item 3 - this might hang!");
+        }
+
         tokio::time::sleep(Duration::from_millis(1000)).await;
+        println!("🌐 [MUTATION] Sleep completed for item {}", id);
 
         // Work with the actual current cached data!
         if let Some(Ok(current_items)) = current_data {
+            println!(
+                "🌐 [MUTATION] Working with {} current items for item {}",
+                current_items.len(),
+                id
+            );
+
+            // Debug the filtering process
+            let items_before_filter: Vec<_> = current_items.iter().map(|item| item.id).collect();
+            println!(
+                "🌐 [MUTATION] Items before filter: {:?}",
+                items_before_filter
+            );
+
             // Remove the item from current state
             let updated_items: Vec<Item> = current_items
                 .iter()
-                .filter(|item| item.id != id)
+                .filter(|item| {
+                    let keep = item.id != id;
+                    if !keep {
+                        println!("🌐 [MUTATION] Filtering out item {}", item.id);
+                    }
+                    keep
+                })
                 .cloned()
                 .collect();
+
+            let items_after_filter: Vec<_> = updated_items.iter().map(|item| item.id).collect();
+            println!("🌐 [MUTATION] Items after filter: {:?}", items_after_filter);
+
+            println!(
+                "🌐 [MUTATION] Mutation complete, returning {} items for item {}",
+                updated_items.len(),
+                id
+            );
 
             // Simulate potential server failure (uncomment to test rollback)
             // if id == 2 { return Err(ItemError::Other("Server error".to_string())); }
 
             Ok(updated_items)
         } else {
+            println!("❌ [MUTATION] No current data to work with for item {}", id);
             Err(ItemError::Other("No current data to work with".to_string()))
         }
     }
@@ -138,7 +178,16 @@ impl Mutation<u64> for OptimisticDeleteMutation {
         // We get the current cached data and modify it instead of duplicating
         let id_to_delete = *input;
 
+        println!(
+            "🔄 [OPTIMISTIC] Deleting item {} optimistically",
+            id_to_delete
+        );
+
         if let Some(Ok(current_items)) = current_data {
+            println!(
+                "🔄 [OPTIMISTIC] Current items count: {}",
+                current_items.len()
+            );
             // Filter out the deleted item from the current data
             let optimistic_result: Vec<Item> = current_items
                 .iter()
@@ -146,11 +195,17 @@ impl Mutation<u64> for OptimisticDeleteMutation {
                 .cloned()
                 .collect();
 
+            println!(
+                "🔄 [OPTIMISTIC] After deletion, items count: {}",
+                optimistic_result.len()
+            );
+
             vec![(
                 provider_cache_key_simple(load_items()),
                 Ok(optimistic_result),
             )]
         } else {
+            println!("❌ [OPTIMISTIC] No current data available for optimistic update");
             // No current data available, return empty (could fallback to invalidation)
             vec![]
         }
@@ -196,11 +251,17 @@ pub fn ItemsList() -> Element {
         div {
             h2 { "Items List" }
             match &*items.read() {
-                ProviderState::Loading { .. } => rsx!(div { "Loading..." }),
-                ProviderState::Error(err) => rsx!(div { "Error: {err}" }),
+                ProviderState::Loading { .. } => rsx! {
+                    div { "Loading..." }
+                },
+                ProviderState::Error(err) => rsx! {
+                    div { "Error: {err}" }
+                },
                 ProviderState::Success(items) => {
                     if items.is_empty() {
-                        rsx!(div { "No items" })
+                        rsx! {
+                            div { "No items" }
+                        }
                     } else {
                         rsx! {
                             div {

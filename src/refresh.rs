@@ -214,14 +214,14 @@ impl RefreshRegistry {
                         if cancel_flag_clone.load(std::sync::atomic::Ordering::SeqCst) {
                             break;
                         }
-                        
+
                         time::sleep(actual_interval).await;
-                        
+
                         // Check if task should be cancelled before running
                         if cancel_flag_clone.load(std::sync::atomic::Ordering::SeqCst) {
                             break;
                         }
-                        
+
                         task_fn();
                     }
                 });

@@ -308,12 +308,24 @@ where
         let mut state = state;
 
         move |input: Input| {
+            // Prevent concurrent mutations by checking if one is already running
+            if matches!(*state.read(), MutationState::Loading) {
+                debug!(
+                    "⏸️ [MUTATION] Skipping mutation - already in progress for: {}",
+                    mutation.id()
+                );
+                return;
+            }
+
             let mutation = mutation.clone();
             let cache = cache.clone();
             let refresh_registry = refresh_registry.clone();
             let input = input.clone();
 
             spawn(async move {
+                // Set loading state immediately to prevent concurrent mutations
+                state.set(MutationState::Loading);
+
                 // Apply optimistic updates for immediate feedback
                 // First, try the enhanced method with current data
                 let cache_keys_to_check: Vec<String> = mutation.invalidates();
@@ -343,8 +355,6 @@ where
                     }
                 }
 
-                state.set(MutationState::Loading);
-
                 debug!(
                     "🔄 [MUTATION] Starting optimistic mutation: {}",
                     mutation.id()
@@ -357,24 +367,49 @@ where
                     None
                 };
 
-                match mutation
+                let mutation_result = mutation
                     .mutate_with_current(input, mutation_current_data.as_ref())
-                    .await
-                {
+                    .await;
+
+                debug!(
+                    "📡 [MUTATION] Mutation completed for: {}, result: {}",
+                    mutation.id(),
+                    match &mutation_result {
+                        Ok(_) => "Success",
+                        Err(_) => "Error",
+                    }
+                );
+
+                match mutation_result {
                     Ok(result) => {
                         debug!(
                             "✅ [MUTATION] Optimistic mutation succeeded: {}",
                             mutation.id()
                         );
 
-                        // Invalidate specified cache entries (ensuring fresh data)
-                        for cache_key in mutation.invalidates() {
+                        // Ensure cache invalidation happens regardless of result
+                        let invalidate_keys = mutation.invalidates();
+                        debug!(
+                            "🔄 [MUTATION] Invalidating {} cache keys: {:?}",
+                            invalidate_keys.len(),
+                            invalidate_keys
+                        );
+
+                        for cache_key in invalidate_keys {
                             debug!("🗑️ [MUTATION] Invalidating cache key: {}", cache_key);
                             cache.invalidate(&cache_key);
                             refresh_registry.trigger_refresh(&cache_key);
+                            debug!(
+                                "✅ [MUTATION] Cache invalidation completed for: {}",
+                                cache_key
+                            );
                         }
 
                         state.set(MutationState::Success(result));
+                        debug!(
+                            "🏁 [MUTATION] Mutation state updated to Success for: {}",
+                            mutation.id()
+                        );
                     }
                     Err(error) => {
                         debug!(
@@ -383,6 +418,11 @@ where
                         );
 
                         // Rollback optimistic updates by invalidating cache to trigger refetch
+                        debug!(
+                            "🔄 [ROLLBACK] Rolling back {} optimistic updates",
+                            optimistic_updates.len()
+                        );
+
                         for (cache_key, _) in &optimistic_updates {
                             debug!(
                                 "🔄 [ROLLBACK] Rolling back optimistic update for cache key: {}",
@@ -393,6 +433,10 @@ where
                         }
 
                         state.set(MutationState::Error(error));
+                        debug!(
+                            "🏁 [MUTATION] Mutation state updated to Error for: {}",
+                            mutation.id()
+                        );
                     }
                 }
             });

@@ -7,7 +7,7 @@ pub mod global;
 pub mod hooks;
 pub mod injection;
 pub mod mutation;
-mod param_utils;
+pub mod param_utils;
 pub mod platform;
 mod provider_state;
 pub mod refresh;
@@ -50,4 +50,7 @@ pub mod prelude {
         ApiError, ApiResult, DatabaseError, DatabaseResult, ProviderError, ProviderResult,
         UserError, UserResult,
     };
+
+    // Parameter utilities for custom types
+    pub use crate::param_utils::IntoProviderParam;
 }
