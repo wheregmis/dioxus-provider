@@ -22,6 +22,7 @@ struct ProviderArgs {
 #[derive(Default)]
 struct MutationArgs {
     invalidates: Vec<syn::Ident>, // List of provider functions to invalidate
+    optimistic: Option<syn::ExprClosure>, // Optimistic closure applied to cached data
 }
 
 impl Parse for ProviderArgs {
@@ -91,6 +92,10 @@ impl Parse for MutationArgs {
                     syn::bracketed!(content in input);
                     let providers = content.parse_terminated(syn::Ident::parse, Token![,])?;
                     args.invalidates = providers.into_iter().collect();
+                }
+                "optimistic" => {
+                    let expr: syn::ExprClosure = input.parse()?;
+                    args.optimistic = Some(expr);
                 }
                 _ => return Err(syn::Error::new_spanned(ident, "Unknown argument")),
             }
@@ -361,100 +366,229 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
         output_type,
         error_type,
         struct_name,
+        fn_name: _fn_name,
         ..
     } = &info;
 
-    // Generate enhanced function body with dependency injection and composition
     let enhanced_fn_block = generate_enhanced_function_body(&[], &[], fn_block);
-
-    // Generate invalidation implementation
     let invalidation_impl = generate_invalidation_impl(&mutation_args);
-
-    // Generate common struct and const
     let common_struct = generate_common_struct_and_const(&info);
 
-    // Determine parameter type and implementation based on function parameters
-    if input_fn.sig.inputs.is_empty() {
-        // No parameters - Mutation<()>
-        Ok(quote! {
-            #common_struct
+    let raw_params = extract_all_params(&input_fn)?;
+    let (input_params, context_param) = split_params(raw_params.clone())?;
 
-            impl #struct_name {
-                #fn_vis async fn call() -> Result<#output_type, #error_type> {
-                    #enhanced_fn_block
-                }
-            }
-
-            impl ::dioxus_provider::mutation::Mutation<()> for #struct_name {
-                type Output = #output_type;
-                type Error = #error_type;
-
-                fn mutate(&self, _input: ()) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
-                    Self::call()
-                }
-
-                #invalidation_impl
+    let call_params: Vec<_> = raw_params
+        .iter()
+        .map(|p| {
+            let name = &p.name;
+            if let Some(ctx) = &context_param && ctx.name == p.name {
+                let data_ty = &ctx.data_ty;
+                let error_ty = &ctx.error_ty;
+                quote! { #name: ::dioxus_provider::mutation::MutationContext<'_, #data_ty, #error_ty> }
+            } else {
+                let ty = &p.ty;
+                quote! { #name: #ty }
             }
         })
-    } else {
-        // Has parameters - extract and handle them
-        let params = extract_all_params(&input_fn)?;
+        .collect();
 
-        if params.len() == 1 {
-            // Single parameter - Mutation<ParamType>
-            let param = &params[0];
-            let param_name = &param.name;
-            let param_type = &param.ty;
+    let call_signature = quote! { #fn_vis async fn call(#(#call_params),*) -> Result<#output_type, #error_type> {
+        #enhanced_fn_block
+    } };
 
-            Ok(quote! {
-                #common_struct
+    let input_count = input_params.len();
 
-                impl #struct_name {
-                    #fn_vis async fn call(#param_name: #param_type) -> Result<#output_type, #error_type> {
-                        #enhanced_fn_block
-                    }
-                }
-
-                impl ::dioxus_provider::mutation::Mutation<#param_type> for #struct_name {
-                    type Output = #output_type;
-                    type Error = #error_type;
-
-                    fn mutate(&self, #param_name: #param_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
-                        Self::call(#param_name)
-                    }
-
-                    #invalidation_impl
-                }
-            })
-        } else {
-            // Multiple parameters - Mutation<(Param1, Param2, ...)>
-            let param_names: Vec<_> = params.iter().map(|p| &p.name).collect();
-            let param_types: Vec<_> = params.iter().map(|p| &p.ty).collect();
-            let tuple_type = quote! { (#(#param_types,)*) };
-
-            Ok(quote! {
-                #common_struct
-
-                impl #struct_name {
-                    #fn_vis async fn call(#(#param_names: #param_types,)*) -> Result<#output_type, #error_type> {
-                        #enhanced_fn_block
-                    }
-                }
-
-                impl ::dioxus_provider::mutation::Mutation<#tuple_type> for #struct_name {
-                    type Output = #output_type;
-                    type Error = #error_type;
-
-                    fn mutate(&self, input: #tuple_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send {
-                        let (#(#param_names,)*) = input;
-                        Self::call(#(#param_names,)*)
-                    }
-
-                    #invalidation_impl
-                }
-            })
+    let input_type = match input_count {
+        0 => quote! { () },
+        1 => {
+            let ty = &input_params[0].ty;
+            quote! { #ty }
         }
-    }
+        _ => {
+            let tys: Vec<_> = input_params.iter().map(|p| &p.ty).collect();
+            quote! { (#(#tys,),*) }
+        }
+    };
+
+    let call_args_builder = |ctx_ident: Option<&syn::Ident>| -> Vec<TokenStream2> {
+        raw_params
+            .iter()
+            .map(|param| {
+                if let Some(ctx) = ctx_ident {
+                    if param.name == *ctx {
+                        let ident = ctx;
+                        return quote! { #ident };
+                    }
+                }
+                let name = &param.name;
+                quote! { #name }
+            })
+            .collect()
+    };
+
+    let context_ident = context_param.as_ref().map(|ctx| ctx.name.clone());
+    let context_data_ty = context_param.as_ref().map(|ctx| ctx.data_ty.clone());
+    let context_error_ty = context_param.as_ref().map(|ctx| ctx.error_ty.clone());
+
+    let call_args = call_args_builder(context_ident.as_ref());
+
+    let optimistic_impl = if let Some(optimistic_expr) = &mutation_args.optimistic {
+        if input_count != 1 {
+            return Err(syn::Error::new_spanned(
+                optimistic_expr,
+                "Optimistic mutations currently require exactly one input parameter",
+            ));
+        }
+
+        if context_param.is_none() {
+            return Err(syn::Error::new_spanned(
+                optimistic_expr,
+                "Optimistic mutations require a MutationContext parameter to access cached data",
+            ));
+        }
+
+        let input_ty = &input_params[0].ty;
+        let optimistic_expr_clone = optimistic_expr.clone();
+
+        quote! {
+            fn optimistic_updates_with_current(
+                &self,
+                input: &#input_ty,
+                current_data: Option<&Result<Self::Output, Self::Error>>,
+            ) -> Vec<(String, Result<Self::Output, Self::Error>)> {
+                let keys = self.invalidates();
+                if keys.is_empty() {
+                    return Vec::new();
+                }
+
+                if let Some(Ok(current)) = current_data {
+                    let mut updated = current.clone();
+                    (#optimistic_expr_clone)(&mut updated, input);
+
+                    let mut results = Vec::with_capacity(keys.len());
+                    for key in keys {
+                        results.push((key, Ok(updated.clone())));
+                    }
+                    results
+                } else {
+                    Vec::new()
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let (mutate_signature, mutate_body) = {
+        let (signature, mut prelude) = match input_count {
+            0 => (
+                quote! { fn mutate(&self, _input: ()) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send },
+                Vec::<TokenStream2>::new(),
+            ),
+            1 => {
+                let param = &input_params[0];
+                let name = &param.name;
+                let ty = &param.ty;
+                (
+                    quote! { fn mutate(&self, #name: #ty) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send },
+                    Vec::<TokenStream2>::new(),
+                )
+            }
+            _ => {
+                let names: Vec<_> = input_params.iter().map(|p| &p.name).collect();
+                (
+                    quote! { fn mutate(&self, input: #input_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send },
+                    vec![quote! { let (#(#names),*) = input; }],
+                )
+            }
+        };
+
+        if let (Some(ctx_ident), Some(data_ty), Some(err_ty)) = (
+            context_ident.as_ref(),
+            context_data_ty.as_ref(),
+            context_error_ty.as_ref(),
+        ) {
+            prelude.push(quote! { let #ctx_ident = ::dioxus_provider::mutation::MutationContext::<'static, #data_ty, #err_ty>::new(None); });
+        }
+
+        let call_expr = quote! { Self::call(#(#call_args),*) };
+        let body = quote! { async move { #(#prelude)* #call_expr.await } };
+        (signature, body)
+    };
+
+    let (mutate_with_current_signature, mutate_with_current_body) = {
+        let (signature, mut prelude) = match input_count {
+            0 => (
+                quote! { fn mutate_with_current(
+                    &self,
+                    _input: (),
+                    current_data: Option<&Result<Self::Output, Self::Error>>,
+                ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send },
+                Vec::<TokenStream2>::new(),
+            ),
+            1 => {
+                let param = &input_params[0];
+                let name = &param.name;
+                let ty = &param.ty;
+                (
+                    quote! { fn mutate_with_current(
+                        &self,
+                        #name: #ty,
+                        current_data: Option<&Result<Self::Output, Self::Error>>,
+                    ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send },
+                    Vec::<TokenStream2>::new(),
+                )
+            }
+            _ => {
+                let names: Vec<_> = input_params.iter().map(|p| &p.name).collect();
+                (
+                    quote! { fn mutate_with_current(
+                        &self,
+                        input: #input_type,
+                        current_data: Option<&Result<Self::Output, Self::Error>>,
+                    ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + Send },
+                    vec![quote! { let (#(#names),*) = input; }],
+                )
+            }
+        };
+
+        if let Some(ctx_ident) = context_ident.as_ref() {
+            prelude.push(quote! { let #ctx_ident = ::dioxus_provider::mutation::MutationContext::new(current_data); });
+        }
+
+        let call_expr = quote! { Self::call(#(#call_args),*) };
+        let body = quote! { async move { #(#prelude)* #call_expr.await } };
+        (signature, body)
+    };
+
+    let mutation_impl = quote! {
+        impl ::dioxus_provider::mutation::Mutation<#input_type> for #struct_name {
+            type Output = #output_type;
+            type Error = #error_type;
+
+            #mutate_signature {
+                #mutate_body
+            }
+
+            #mutate_with_current_signature {
+                #mutate_with_current_body
+            }
+
+            #optimistic_impl
+
+            #invalidation_impl
+        }
+    };
+
+    Ok(quote! {
+        #common_struct
+
+        impl #struct_name {
+            #call_signature
+        }
+
+        #mutation_impl
+    })
 }
 
 /// Generate duration implementation for provider methods
@@ -523,9 +657,66 @@ struct ProviderInfo {
 }
 
 /// Information about a function parameter
+#[derive(Clone)]
 struct ParamInfo {
     name: syn::Ident,
     ty: Type,
+}
+
+#[derive(Clone)]
+struct ContextInfo {
+    name: syn::Ident,
+    data_ty: Type,
+    error_ty: Type,
+}
+
+fn parse_context_type(ty: &Type) -> Option<(Type, Type)> {
+    if let Type::Path(type_path) = ty {
+        if let Some(segment) = type_path.path.segments.last() {
+            if segment.ident == "MutationContext" {
+                if let syn::PathArguments::AngleBracketed(args) = &segment.arguments {
+                    if args.args.len() == 2 {
+                        let mut iter = args.args.iter();
+                        let data_ty = match iter.next()? {
+                            syn::GenericArgument::Type(ty) => ty.clone(),
+                            _ => return None,
+                        };
+                        let error_ty = match iter.next()? {
+                            syn::GenericArgument::Type(ty) => ty.clone(),
+                            _ => return None,
+                        };
+                        return Some((data_ty, error_ty));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn split_params(params: Vec<ParamInfo>) -> Result<(Vec<ParamInfo>, Option<ContextInfo>)> {
+    let mut input_params = Vec::new();
+    let mut context_param = None;
+
+    for param in params {
+        if let Some((data_ty, error_ty)) = parse_context_type(&param.ty) {
+            if context_param.is_some() {
+                return Err(syn::Error::new_spanned(
+                    param.ty,
+                    "Only one MutationContext parameter is allowed",
+                ));
+            }
+            context_param = Some(ContextInfo {
+                name: param.name,
+                data_ty,
+                error_ty,
+            });
+        } else {
+            input_params.push(param);
+        }
+    }
+
+    Ok((input_params, context_param))
 }
 
 /// Extract provider information from the input function

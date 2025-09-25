@@ -41,8 +41,8 @@ pub mod prelude {
 
     // Mutation system - Manual Implementation Pattern
     pub use crate::mutation::{
-        Mutation, MutationState, provider_cache_key, provider_cache_key_simple, use_mutation,
-        use_optimistic_mutation,
+        Mutation, MutationContext, MutationState, provider_cache_key, provider_cache_key_simple,
+        use_mutation, use_optimistic_mutation,
     };
 
     // Error types
