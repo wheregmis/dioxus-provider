@@ -219,7 +219,7 @@ pub async fn delete_todo(
     sleep(Duration::from_millis(200)).await;
 
     if let Some(current) = ctx.cloned_success() {
-        if current.iter().any(|t| t.id == id) {
+        if current.iter().all(|t| t.id != id) {
             return Err(TodoError::NotFound);
         }
         save_todos_to_file_async(&current).await?;
