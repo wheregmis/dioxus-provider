@@ -210,7 +210,7 @@ where
         let refresh_registry = refresh_registry
             .expect("Global providers not initialized")
             .clone();
-        let mut state = state;
+        let state = state;
 
         move |input: Input| {
             let mutation = mutation.clone();
@@ -331,7 +331,7 @@ where
         let refresh_registry = refresh_registry
             .expect("Global providers not initialized")
             .clone();
-        let mut state = state;
+        let state = state;
 
         move |input: Input| {
             // Prevent concurrent mutations by checking if one is already running
