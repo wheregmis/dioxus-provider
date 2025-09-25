@@ -14,7 +14,7 @@
 
 use dioxus::prelude::*;
 use futures::channel::oneshot;
-use std::future::Future;
+use std::{collections::HashSet, future::Future};
 use tracing::debug;
 
 use crate::{
@@ -485,13 +485,20 @@ where
                                 );
                             }
                         } else {
+                            let mut final_keys: HashSet<String> =
+                                cache_keys_to_check.iter().cloned().collect();
+                            for (cache_key, _) in &optimistic_updates_for_rollback {
+                                final_keys.insert(cache_key.clone());
+                            }
+
                             debug!(
                                 "📦 [MUTATION] Updating {} cache keys with mutation result",
-                                cache_keys_to_check.len()
+                                final_keys.len()
                             );
-                            for cache_key in &cache_keys_to_check {
+
+                            for cache_key in final_keys {
                                 cache.set(cache_key.clone(), Ok::<_, M::Error>(result.clone()));
-                                refresh_registry.trigger_refresh(cache_key);
+                                refresh_registry.trigger_refresh(&cache_key);
                             }
                         }
                     }
