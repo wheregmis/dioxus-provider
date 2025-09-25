@@ -12,6 +12,9 @@ use crate::{
 
 use super::{Provider, swr::check_and_handle_swr_core};
 
+/// Minimum interval for periodic tasks to prevent busy spinning
+const MIN_TASK_INTERVAL: Duration = Duration::from_millis(1);
+
 /// Sets up interval refresh task for a provider
 #[cfg(not(target_family = "wasm"))]
 pub fn setup_interval_task_core<P, Param>(
@@ -107,10 +110,13 @@ pub fn setup_cache_expiration_task_core<P, Param>(
         let cache_key_clone = cache_key.to_string();
         let refresh_registry_clone = refresh_registry.clone();
 
+        // Compute check interval as quarter of expiration time, but ensure minimum interval
+        let check_interval = std::cmp::max(expiration / 4, MIN_TASK_INTERVAL);
+
         refresh_registry.start_periodic_task(
             cache_key,
             TaskType::CacheExpiration,
-            expiration / 4, // Check every quarter of the expiration time
+            check_interval, // Check every quarter of the expiration time (min 1ms)
             move || {
                 // Check if cache entry has expired
                 if let Ok(mut cache_lock) = cache_clone.cache.lock() {
@@ -150,10 +156,13 @@ pub fn setup_cache_expiration_task_core<P, Param>(
         let cache_key_clone = cache_key.to_string();
         let refresh_registry_clone = refresh_registry.clone();
 
+        // Compute check interval as quarter of expiration time, but ensure minimum interval
+        let check_interval = std::cmp::max(expiration / 4, MIN_TASK_INTERVAL);
+
         refresh_registry.start_periodic_task(
             cache_key,
             TaskType::CacheExpiration,
-            expiration / 4, // Check every quarter of the expiration time
+            check_interval, // Check every quarter of the expiration time (min 1ms)
             move || {
                 // Check if cache entry has expired
                 if let Ok(mut cache_lock) = cache_clone.cache.lock() {
