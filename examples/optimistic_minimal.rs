@@ -1,20 +1,18 @@
-//! Minimal Optimistic Mutations Example for dioxus-provider
+//! Minimal optimistic mutation demo for `dioxus-provider`.
 //!
-//! This demonstrates the ZERO-DUPLICATION optimistic mutations system:
+//! ## What this example shows
+//! - `#[provider]` defines the read-only data source with zero boilerplate.
+//! - `#[mutation(..., optimistic = ...)]` rewrites the cache instantly and reuses the
+//!   exact same logic inside the server call through `MutationContext` – no duplication.
+//! - `use_optimistic_mutation` wires everything together and only reports an error if the
+//!   server rejects the change.
 //!
-//! ✅ INSTANT UI updates - no loading states, no waiting
-//! ✅ Automatic rollback on failure  
-//! ✅ ZERO data duplication - both optimistic updates AND mutations work with cached data
-//! ✅ EFFICIENT API - library provides current cached data automatically
-//! ✅ Library handles all the complexity
+//! ## Try it
+//! 1. Run `cargo run --example optimistic_minimal`.
+//! 2. Delete any item. It disappears immediately thanks to the optimistic cache update.
+//! 3. Uncomment the simulated error inside `delete_item` to see the automatic rollback.
 //!
-//! ## How it works with the new macro API:
-//! 1. Provider loads initial data (only place data is defined!)
-//! 2. User clicks delete
-//! 3. The `#[mutation]` macro supplies cached data through `MutationContext`
-//! 4. The optimistic closure modifies cached data instantly, so the UI updates with zero delay
-//! 5. The real mutation runs with the same cached data
-//! 6. Success keeps the optimistic result; failure triggers automatic rollback
+//! The rest of this file stays intentionally small so you can focus on the macro APIs.
 
 use dioxus::prelude::*;
 use dioxus_provider::prelude::*;
@@ -67,26 +65,10 @@ pub async fn delete_item(
     id: u64,
     ctx: MutationContext<Vec<Item>, ItemError>,
 ) -> Result<Vec<Item>, ItemError> {
-    println!("🌐 [MUTATION] Starting server mutation for item {}", id);
-    if id == 3 {
-        println!("⚠️ [DEBUG] Processing item 3 - extra logging enabled");
-    }
-
     sleep(Duration::from_millis(1000)).await;
-    println!("🌐 [MUTATION] Sleep completed for item {}", id);
 
-    ctx.map_current(|items| {
-        println!(
-            "🌐 [MUTATION] Current items count before filter: {}",
-            items.len()
-        );
-        let before: Vec<_> = items.iter().map(|item| item.id).collect();
-        println!("🌐 [MUTATION] Items before filter: {:?}", before);
-        items.retain(|item| item.id != id);
-        let after: Vec<_> = items.iter().map(|item| item.id).collect();
-        println!("🌐 [MUTATION] Items after filter: {:?}", after);
-    })
-    .ok_or_else(|| ItemError::Other("No current data to work with".to_string()))
+    ctx.map_current(|items| items.retain(|item| item.id != id))
+        .ok_or_else(|| ItemError::Other("No current data to work with".to_string()))
 }
 
 /// Item component with delete button using the new macro-generated mutation
@@ -119,11 +101,17 @@ pub fn ItemsList() -> Element {
         div {
             h2 { "Items List" }
             match &*items.read() {
-                ProviderState::Loading { .. } => rsx! { div { "Loading..." } },
-                ProviderState::Error(err) => rsx! { div { "Error: {err}" } },
+                ProviderState::Loading { .. } => rsx! {
+                    div { "Loading..." }
+                },
+                ProviderState::Error(err) => rsx! {
+                    div { "Error: {err}" }
+                },
                 ProviderState::Success(items) => {
                     if items.is_empty() {
-                        rsx! { div { "No items" } }
+                        rsx! {
+                            div { "No items" }
+                        }
                     } else {
                         rsx! {
                             div {
