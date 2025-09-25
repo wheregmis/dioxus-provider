@@ -257,7 +257,7 @@ pub fn check_and_handle_cache_expiration(
     refresh_registry: &RefreshRegistry,
 ) {
     if let Some(expiration) = cache_expiration {
-        if let Ok(mut cache_lock) = cache.cache.lock() {
+        let should_trigger_refresh = if let Ok(mut cache_lock) = cache.cache.lock() {
             if let Some(entry) = cache_lock.get(cache_key) {
                 if entry.is_expired(expiration) {
                     debug!(
@@ -265,10 +265,20 @@ pub fn check_and_handle_cache_expiration(
                         cache_key
                     );
                     cache_lock.remove(cache_key);
-                    // Trigger a refresh to re-execute the provider
-                    refresh_registry.trigger_refresh(cache_key);
+                    true // Mark that we need to trigger refresh after dropping the lock
+                } else {
+                    false
                 }
+            } else {
+                false
             }
+        } else {
+            false
+        };
+
+        // Trigger refresh after the lock has been dropped to prevent deadlocks
+        if should_trigger_refresh {
+            refresh_registry.trigger_refresh(cache_key);
         }
     }
 }
