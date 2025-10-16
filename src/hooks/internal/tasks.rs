@@ -2,8 +2,7 @@
 
 use dioxus::prelude::*;
 use std::time::Duration;
-#[cfg(feature = "tracing")]
-use tracing::debug;
+
 
 use crate::{
     cache::ProviderCache,

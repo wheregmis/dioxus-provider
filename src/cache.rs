@@ -25,10 +25,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "tracing")]
-#[cfg(feature = "tracing")]
-use tracing::debug;
-
 use crate::platform::{DEFAULT_MAX_CACHE_SIZE, DEFAULT_UNUSED_THRESHOLD};
 
 // Platform-specific time imports
@@ -329,7 +325,6 @@ impl ProviderCache {
                 // Remove expired entry
                 if let Ok(mut cache) = self.cache.lock() {
                     cache.remove(key);
-                    #[cfg(feature = "tracing")]
                     crate::debug_log!(
                         "🗑️ [CACHE-EXPIRATION] Removing expired cache entry for key: {}",
                         key
@@ -534,7 +529,6 @@ impl ProviderCache {
     /// The entry is removed from the cache.
     pub fn invalidate(&self, key: &str) {
         self.remove(key);
-        #[cfg(feature = "tracing")]
         crate::debug_log!(
             "🗑️ [CACHE-INVALIDATE] Invalidated cache entry for key: {}",
             key
@@ -552,6 +546,7 @@ impl ProviderCache {
     /// All entries are removed from the cache.
     pub fn clear(&self) {
         if let Ok(mut cache) = self.cache.lock() {
+            #[cfg(feature = "tracing")]
             let count = cache.len();
             cache.clear();
             crate::debug_log!("🗑️ [CACHE-CLEAR] Cleared {} cache entries", count);
@@ -592,10 +587,11 @@ impl ProviderCache {
     pub fn cleanup_unused_entries(&self, unused_threshold: Duration) -> usize {
         if let Ok(mut cache) = self.cache.lock() {
             let initial_size = cache.len();
-            cache.retain(|key, entry| {
+            cache.retain(|_key, entry| {
                 let should_keep = !entry.is_unused_for(unused_threshold);
+                #[cfg(feature = "tracing")]
                 if !should_keep {
-                    crate::debug_log!("🧹 [CACHE-CLEANUP] Removing unused entry: {}", key);
+                    crate::debug_log!("🧹 [CACHE-CLEANUP] Removing unused entry: {}", _key);
                 }
                 should_keep
             });

@@ -31,8 +31,7 @@ use dioxus::{
     prelude::*,
 };
 use std::{fmt::Debug, future::Future, time::Duration};
-#[cfg(feature = "tracing")]
-use tracing::debug;
+
 
 use crate::{
     cache::ProviderCache,

@@ -15,8 +15,6 @@
 use dioxus::prelude::*;
 use futures::channel::oneshot;
 use std::{collections::HashSet, future::Future};
-#[cfg(feature = "tracing")]
-use tracing::debug;
 
 use crate::{
     global::{get_global_cache, get_global_refresh_registry},
@@ -410,12 +408,17 @@ where
             });
 
             dioxus_core::spawn_forever(async move {
+                #[cfg(feature = "tracing")]
                 let mutation_type = if is_optimistic {
                     "optimistic mutation"
                 } else {
                     "mutation"
                 };
-                crate::debug_log!("🔄 [MUTATION] Starting {}: {}", mutation_type, mutation.id());
+                crate::debug_log!(
+                    "🔄 [MUTATION] Starting {}: {}",
+                    mutation_type,
+                    mutation.id()
+                );
 
                 // Get current data for the mutation
                 let mutation_current_data = cache_keys_to_check
@@ -465,7 +468,10 @@ where
                             );
 
                             for cache_key in &cache_keys_to_check {
-                                crate::debug_log!("🗑️ [MUTATION] Invalidating cache key: {}", cache_key);
+                                crate::debug_log!(
+                                    "🗑️ [MUTATION] Invalidating cache key: {}",
+                                    cache_key
+                                );
                                 cache.invalidate(cache_key);
                                 refresh_registry.trigger_refresh(cache_key);
                             }
