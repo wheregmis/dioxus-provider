@@ -2,15 +2,15 @@
 //!
 //! ## What this example shows
 //! - `#[provider]` defines the read-only data source with zero boilerplate.
-//! - `#[mutation(..., optimistic = ...)]` rewrites the cache instantly and reuses the
-//!   exact same logic inside the server call through `MutationContext` – no duplication.
+//! - `#[mutation(..., optimistic = ...)]` auto-applies the optimistic update and passes
+//!   the mutated data directly to your function - no duplication, no manual context checks!
 //! - Multi-argument optimistic mutations are fully supported.
 //! - `use_optimistic_mutation` wires everything together and only reports an error if the
 //!   server rejects the change.
 //!
 //! ## Try it
 //! 1. Run `cargo run --example optimistic_minimal`.
-//! 2. Delete any item. It disappears immediately thanks to the optimistic cache update.
+//! 2. Delete any item. It disappears immediately thanks to the auto-applied optimistic update.
 //! 3. Update any item's name. It changes immediately with the multi-arg optimistic mutation.
 //! 4. Uncomment the simulated error inside mutations to see the automatic rollback.
 //!
@@ -58,19 +58,16 @@ pub async fn load_items() -> Result<Vec<Item>, ItemError> {
     ])
 }
 
-/// Delete an item while reusing the same optimistic closure for both optimistic and real updates.
+/// Delete an item - optimistic update is auto-applied!
 #[mutation(
     invalidates = [load_items],
     optimistic = |items: &mut Vec<Item>, id: &u64| items.retain(|item| item.id != *id)
 )]
-pub async fn delete_item(
-    id: u64,
-    ctx: MutationContext<Vec<Item>, ItemError>,
-) -> Result<Vec<Item>, ItemError> {
+pub async fn delete_item(_id: u64, items: Vec<Item>) -> Result<Vec<Item>, ItemError> {
     sleep(Duration::from_millis(1000)).await;
-
-    ctx.map_current(|items| items.retain(|item| item.id != id))
-        .ok_or_else(|| ItemError::Other("No current data to work with".to_string()))
+    // In a real app, you'd persist to a backend here
+    // The optimistic update is already applied to `items`
+    Ok(items)
 }
 
 /// Update an item's name - demonstrates multi-argument optimistic mutation
@@ -83,18 +80,14 @@ pub async fn delete_item(
     }
 )]
 pub async fn update_item(
-    id: u64,
-    new_name: String,
-    ctx: MutationContext<Vec<Item>, ItemError>,
+    _id: u64,
+    _new_name: String,
+    items: Vec<Item>,
 ) -> Result<Vec<Item>, ItemError> {
     sleep(Duration::from_millis(1000)).await;
-
-    ctx.map_current(|items| {
-        if let Some(item) = items.iter_mut().find(|i| i.id == id) {
-            item.name = new_name;
-        }
-    })
-    .ok_or_else(|| ItemError::Other("No current data to work with".to_string()))
+    // In a real app, you'd persist to a backend here
+    // The optimistic update is already applied to `items`
+    Ok(items)
 }
 
 /// Item component with delete and update buttons demonstrating optimistic mutations

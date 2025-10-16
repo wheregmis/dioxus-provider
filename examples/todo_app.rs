@@ -115,27 +115,10 @@ async fn save_todos_to_file_async(todos: &[Todo]) -> Result<(), TodoError> {
         });
     }
 )]
-pub async fn add_todo(
-    title: String,
-    ctx: MutationContext<Vec<Todo>, TodoError>,
-) -> Result<Vec<Todo>, TodoError> {
+pub async fn add_todo(_title: String, todos: Vec<Todo>) -> Result<Vec<Todo>, TodoError> {
     sleep(Duration::from_millis(400)).await;
-
-    let updated = if let Some(mutated) = ctx.cloned_success() {
-        mutated
-    } else {
-        let mut todos = load_todos_from_file_async().await?;
-        let id = next_todo_id(&todos);
-        todos.push(Todo {
-            id,
-            title,
-            completed: false,
-        });
-        todos
-    };
-
-    save_todos_to_file_async(&updated).await?;
-    Ok(updated)
+    save_todos_to_file_async(&todos).await?;
+    Ok(todos)
 }
 
 /// Mutation: Toggle a todo's completed status
@@ -147,25 +130,10 @@ pub async fn add_todo(
         }
     }
 )]
-pub async fn toggle_todo(
-    id: u64,
-    ctx: MutationContext<Vec<Todo>, TodoError>,
-) -> Result<Vec<Todo>, TodoError> {
+pub async fn toggle_todo(_id: u64, todos: Vec<Todo>) -> Result<Vec<Todo>, TodoError> {
     sleep(Duration::from_millis(250)).await;
-
-    if let Some(current) = ctx.cloned_success() {
-        save_todos_to_file_async(&current).await?;
-        Ok(current)
-    } else {
-        let mut todos = load_todos_from_file_async().await?;
-        let todo = todos
-            .iter_mut()
-            .find(|t| t.id == id)
-            .ok_or(TodoError::NotFound)?;
-        todo.completed = !todo.completed;
-        save_todos_to_file_async(&todos).await?;
-        Ok(todos)
-    }
+    save_todos_to_file_async(&todos).await?;
+    Ok(todos)
 }
 
 /// Mutation: Update a todo's title
@@ -177,26 +145,10 @@ pub async fn toggle_todo(
         }
     }
 )]
-pub async fn update_todo(
-    payload: TodoUpdate,
-    ctx: MutationContext<Vec<Todo>, TodoError>,
-) -> Result<Vec<Todo>, TodoError> {
+pub async fn update_todo(_payload: TodoUpdate, todos: Vec<Todo>) -> Result<Vec<Todo>, TodoError> {
     sleep(Duration::from_millis(300)).await;
-
-    let id = payload.id;
-    if let Some(current) = ctx.cloned_success() {
-        save_todos_to_file_async(&current).await?;
-        Ok(current)
-    } else {
-        let mut todos = load_todos_from_file_async().await?;
-        let todo = todos
-            .iter_mut()
-            .find(|t| t.id == id)
-            .ok_or(TodoError::NotFound)?;
-        todo.title = payload.title;
-        save_todos_to_file_async(&todos).await?;
-        Ok(todos)
-    }
+    save_todos_to_file_async(&todos).await?;
+    Ok(todos)
 }
 
 /// Mutation: Delete a todo
@@ -206,21 +158,10 @@ pub async fn update_todo(
         todos.retain(|t| t.id != *id);
     }
 )]
-pub async fn delete_todo(
-    id: u64,
-    ctx: MutationContext<Vec<Todo>, TodoError>,
-) -> Result<Vec<Todo>, TodoError> {
+pub async fn delete_todo(_id: u64, todos: Vec<Todo>) -> Result<Vec<Todo>, TodoError> {
     sleep(Duration::from_millis(200)).await;
-
-    if let Some(current) = ctx.cloned_success() {
-        save_todos_to_file_async(&current).await?;
-        Ok(current)
-    } else {
-        let mut todos = load_todos_from_file_async().await?;
-        todos.retain(|t| t.id != id);
-        save_todos_to_file_async(&todos).await?;
-        Ok(todos)
-    }
+    save_todos_to_file_async(&todos).await?;
+    Ok(todos)
 }
 
 /// Component: Input for adding a new todo
