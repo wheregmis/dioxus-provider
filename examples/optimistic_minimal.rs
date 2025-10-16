@@ -4,13 +4,15 @@
 //! - `#[provider]` defines the read-only data source with zero boilerplate.
 //! - `#[mutation(..., optimistic = ...)]` rewrites the cache instantly and reuses the
 //!   exact same logic inside the server call through `MutationContext` – no duplication.
+//! - Multi-argument optimistic mutations are fully supported.
 //! - `use_optimistic_mutation` wires everything together and only reports an error if the
 //!   server rejects the change.
 //!
 //! ## Try it
 //! 1. Run `cargo run --example optimistic_minimal`.
 //! 2. Delete any item. It disappears immediately thanks to the optimistic cache update.
-//! 3. Uncomment the simulated error inside `delete_item` to see the automatic rollback.
+//! 3. Update any item's name. It changes immediately with the multi-arg optimistic mutation.
+//! 4. Uncomment the simulated error inside mutations to see the automatic rollback.
 //!
 //! The rest of this file stays intentionally small so you can focus on the macro APIs.
 
@@ -71,22 +73,70 @@ pub async fn delete_item(
         .ok_or_else(|| ItemError::Other("No current data to work with".to_string()))
 }
 
-/// Item component with delete button using the new macro-generated mutation
+/// Update an item's name - demonstrates multi-argument optimistic mutation
+#[mutation(
+    invalidates = [load_items],
+    optimistic = |items: &mut Vec<Item>, id: &u64, new_name: &String| {
+        if let Some(item) = items.iter_mut().find(|i| i.id == *id) {
+            item.name = new_name.clone();
+        }
+    }
+)]
+pub async fn update_item(
+    id: u64,
+    new_name: String,
+    ctx: MutationContext<Vec<Item>, ItemError>,
+) -> Result<Vec<Item>, ItemError> {
+    sleep(Duration::from_millis(1000)).await;
+
+    ctx.map_current(|items| {
+        if let Some(item) = items.iter_mut().find(|i| i.id == id) {
+            item.name = new_name;
+        }
+    })
+    .ok_or_else(|| ItemError::Other("No current data to work with".to_string()))
+}
+
+/// Item component with delete and update buttons demonstrating optimistic mutations
 #[component]
 pub fn ItemCard(item: Item) -> Element {
     let (delete_state, delete_item) = use_optimistic_mutation(delete_item());
+    let (update_state, update_item) = use_optimistic_mutation(update_item());
+    let mut new_name = use_signal(|| item.name.clone());
     let item_id = item.id;
 
     let on_delete = move |_| {
         delete_item(item_id);
     };
 
+    let on_update = move |_| {
+        let name = new_name.read().clone();
+        update_item((item_id, name));
+    };
+
     rsx! {
         div {
-            span { "{item.name}" }
-            button { onclick: on_delete, "Delete" }
+            style: "border: 1px solid #ccc; padding: 10px; margin: 5px;",
+            div {
+                style: "margin-bottom: 5px;",
+                strong { "ID: {item.id} - " }
+                span { "{item.name}" }
+            }
+            div {
+                style: "display: flex; gap: 5px; align-items: center;",
+                input {
+                    r#type: "text",
+                    value: "{new_name}",
+                    oninput: move |evt| new_name.set(evt.value().clone())
+                }
+                button { onclick: on_update, "Update" }
+                button { onclick: on_delete, "Delete" }
+            }
             if let MutationState::Error(err) = &*delete_state.read() {
-                span { style: "color: red; margin-left: 10px;", "Error: {err}" }
+                div { style: "color: red; margin-top: 5px;", "Delete error: {err}" }
+            }
+            if let MutationState::Error(err) = &*update_state.read() {
+                div { style: "color: red; margin-top: 5px;", "Update error: {err}" }
             }
         }
     }
@@ -133,9 +183,13 @@ pub fn App() -> Element {
     rsx! {
         div {
             h1 { "Optimistic Mutations Demo" }
-            p { "Click delete and notice the item disappears INSTANTLY!" }
-            p { "No loading states, no waiting - just immediate feedback." }
-            p { "If the server fails, the item will reappear with an error message." }
+            p { "This demo shows both single-arg and multi-arg optimistic mutations:" }
+            ul {
+                li { "Delete: Single-arg optimistic mutation - item disappears INSTANTLY" }
+                li { "Update: Multi-arg optimistic mutation - name changes INSTANTLY" }
+            }
+            p { "No loading states, no waiting - just immediate feedback!" }
+            p { "If the server fails, changes will rollback with an error message." }
             ItemsList {}
         }
     }

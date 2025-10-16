@@ -186,6 +186,12 @@ where
     /// Compute optimistic updates with access to current cached data
     /// This is more efficient as it allows mutations to work with existing data
     /// instead of duplicating data structures
+    ///
+    /// ## Return Value Usage
+    /// The mutation's return value is used to update the cache directly on success,
+    /// avoiding unnecessary provider refetches when using optimistic updates.
+    /// When optimistic updates are defined, the actual server response replaces
+    /// the optimistic value in the cache, keeping the UI in sync with the backend.
     fn optimistic_updates_with_current(
         &self,
         _input: &Input,
