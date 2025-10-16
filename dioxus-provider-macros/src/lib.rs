@@ -645,6 +645,16 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
         (signature, body)
     };
 
+    let has_optimistic_impl = if has_optimistic {
+        quote! {
+            fn has_optimistic(&self) -> bool {
+                true
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let mutation_impl = quote! {
         impl ::dioxus_provider::mutation::Mutation<#input_type> for #struct_name {
             type Output = #output_type;
@@ -661,6 +671,8 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
             #optimistic_impl
 
             #invalidation_impl
+
+            #has_optimistic_impl
         }
     };
 

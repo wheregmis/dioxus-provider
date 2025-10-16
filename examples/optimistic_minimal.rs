@@ -5,7 +5,7 @@
 //! - `#[mutation(..., optimistic = ...)]` auto-applies the optimistic update and passes
 //!   the mutated data directly to your function - no duplication, no manual context checks!
 //! - Multi-argument optimistic mutations are fully supported.
-//! - `use_optimistic_mutation` wires everything together and only reports an error if the
+//! - `use_mutation` automatically detects optimistic updates and only reports an error if the
 //!   server rejects the change.
 //!
 //! ## Try it
@@ -93,8 +93,8 @@ pub async fn update_item(
 /// Item component with delete and update buttons demonstrating optimistic mutations
 #[component]
 pub fn ItemCard(item: Item) -> Element {
-    let (delete_state, delete_item) = use_optimistic_mutation(delete_item());
-    let (update_state, update_item) = use_optimistic_mutation(update_item());
+    let (delete_state, delete_item) = use_mutation(delete_item());
+    let (update_state, update_item) = use_mutation(update_item());
     let mut new_name = use_signal(|| item.name.clone());
     let item_id = item.id;
 

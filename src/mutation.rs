@@ -263,6 +263,12 @@ where
         Vec::new()
     }
 
+    /// Returns true if this mutation has optimistic updates configured
+    /// Used by `use_mutation` to automatically detect and enable optimistic behavior
+    fn has_optimistic(&self) -> bool {
+        false
+    }
+
     /// Provide optimistic cache updates for immediate UI feedback
     /// Returns a list of (cache_key, optimistic_result) pairs to update the cache with
     /// This allows the UI to update immediately with the expected result
@@ -513,6 +519,11 @@ where
 
 /// Hook to create a mutation that can be triggered manually
 ///
+/// This hook automatically detects whether optimistic updates are configured
+/// in the `#[mutation]` macro and enables them accordingly. You no longer need
+/// to choose between `use_mutation` and `use_optimistic_mutation` - this hook
+/// handles both cases automatically.
+///
 /// Returns a tuple containing:
 /// 1. A signal with the current mutation state
 /// 2. A function to trigger the mutation
@@ -553,13 +564,23 @@ where
     M: Mutation<Input> + Send + Sync + 'static,
     Input: Clone + PartialEq + Send + Sync + 'static,
 {
-    mutation_core(mutation, MutationConfig::default())
+    let config = if mutation.has_optimistic() {
+        MutationConfig::optimistic()
+    } else {
+        MutationConfig::default()
+    };
+    mutation_core(mutation, config)
 }
 
-/// Hook to create a mutation with optimistic invalidation
+/// Hook to create a mutation with optimistic updates
 ///
-/// This variant optimistically invalidates cache entries immediately when the mutation
-/// is triggered, providing instant feedback while the mutation is in progress.
+/// **Note:** This hook is now an alias for `use_mutation`, which automatically detects
+/// whether optimistic updates are configured. You can use `use_mutation` directly instead.
+/// This function is maintained for backward compatibility.
+///
+/// The optimistic behavior is automatically detected from the `#[mutation]` macro's
+/// `optimistic` parameter. If an optimistic closure is provided in the macro,
+/// the mutation will automatically use optimistic updates.
 ///
 /// ## Example
 ///
@@ -569,7 +590,9 @@ where
 ///
 /// #[component]
 /// fn TodoItem(todo_id: u32) -> Element {
-///     let (mutation_state, mutate) = use_optimistic_mutation(toggle_todo());
+///     // Both of these are equivalent:
+///     let (mutation_state, mutate) = use_mutation(toggle_todo());
+///     // let (mutation_state, mutate) = use_optimistic_mutation(toggle_todo());
 ///     
 ///     rsx! {
 ///         div {
@@ -593,7 +616,8 @@ where
     M: Mutation<Input> + Send + Sync + 'static,
     Input: Clone + PartialEq + Send + Sync + 'static,
 {
-    mutation_core(mutation, MutationConfig::optimistic())
+    // Simply delegate to use_mutation, which auto-detects optimistic updates
+    use_mutation(mutation)
 }
 
 /// Helper function to create cache keys for providers with parameters

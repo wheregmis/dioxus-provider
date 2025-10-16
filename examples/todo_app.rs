@@ -168,7 +168,7 @@ pub async fn delete_todo(_id: u64, todos: Vec<Todo>) -> Result<Vec<Todo>, TodoEr
 #[component]
 pub fn TodoInput() -> Element {
     let mut input = use_signal(String::new);
-    let (_, add) = use_optimistic_mutation(add_todo());
+    let (_, add) = use_mutation(add_todo());
 
     let on_keydown = {
         let add = add.clone();
@@ -233,9 +233,9 @@ pub fn TodoInput() -> Element {
 pub fn TodoItem(todo: Todo) -> Element {
     let mut editing = use_signal(|| false);
     let mut edit_text = use_signal(|| todo.title.clone());
-    let (_, toggle) = use_optimistic_mutation(toggle_todo());
-    let (_, delete) = use_optimistic_mutation(delete_todo());
-    let (_, update) = use_optimistic_mutation(update_todo());
+    let (_, toggle) = use_mutation(toggle_todo());
+    let (_, delete) = use_mutation(delete_todo());
+    let (_, update) = use_mutation(update_todo());
 
     let todo_id = todo.id;
     let todo_title = todo.title.clone();
