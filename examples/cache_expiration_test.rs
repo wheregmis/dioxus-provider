@@ -80,7 +80,7 @@ fn App() -> Element {
 
 fn main() {
     // Initialize global providers
-    init_global_providers();
+    dioxus_provider::init();
 
     println!("🚀 Starting Reactive Cache Expiration Test");
     println!("📋 Expected behavior:");

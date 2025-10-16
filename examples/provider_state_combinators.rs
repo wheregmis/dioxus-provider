@@ -61,6 +61,6 @@ fn App() -> Element {
 }
 
 fn main() {
-    init_global_providers();
+    dioxus_provider::init();
     launch(App);
 }

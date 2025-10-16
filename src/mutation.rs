@@ -15,6 +15,7 @@
 use dioxus::prelude::*;
 use futures::channel::oneshot;
 use std::{collections::HashSet, future::Future};
+#[cfg(feature = "tracing")]
 use tracing::debug;
 
 use crate::{
@@ -349,7 +350,7 @@ where
         move |input: Input| {
             // Prevent concurrent optimistic mutations
             if is_optimistic && matches!(*state.read(), MutationState::Loading) {
-                debug!(
+                crate::debug_log!(
                     "⏸️ [MUTATION] Skipping mutation - already in progress for: {}",
                     mutation.id()
                 );
@@ -382,7 +383,7 @@ where
                 }
 
                 if !optimistic_updates.is_empty() {
-                    debug!(
+                    crate::debug_log!(
                         "⚡ [OPTIMISTIC] Optimistically updating {} cache entries",
                         optimistic_updates.len()
                     );
@@ -414,7 +415,7 @@ where
                 } else {
                     "mutation"
                 };
-                debug!("🔄 [MUTATION] Starting {}: {}", mutation_type, mutation.id());
+                crate::debug_log!("🔄 [MUTATION] Starting {}: {}", mutation_type, mutation.id());
 
                 // Get current data for the mutation
                 let mutation_current_data = cache_keys_to_check
@@ -425,7 +426,7 @@ where
                     .mutate_with_current(input, mutation_current_data.as_ref())
                     .await;
 
-                debug!(
+                crate::debug_log!(
                     "📡 [MUTATION] Mutation completed for: {}, result: {}",
                     mutation.id(),
                     match &mutation_result {
@@ -436,7 +437,7 @@ where
 
                 match &mutation_result {
                     Ok(result) => {
-                        debug!("✅ [MUTATION] Mutation succeeded: {}", mutation.id());
+                        crate::debug_log!("✅ [MUTATION] Mutation succeeded: {}", mutation.id());
 
                         if is_optimistic && !optimistic_updates_for_rollback.is_empty() {
                             // Update optimistic caches with real result
@@ -446,7 +447,7 @@ where
                                 final_keys.insert(cache_key.clone());
                             }
 
-                            debug!(
+                            crate::debug_log!(
                                 "📦 [MUTATION] Updating {} cache keys with mutation result",
                                 final_keys.len()
                             );
@@ -457,30 +458,30 @@ where
                             }
                         } else {
                             // Standard cache invalidation
-                            debug!(
+                            crate::debug_log!(
                                 "🔄 [MUTATION] Invalidating {} cache keys: {:?}",
                                 cache_keys_to_check.len(),
                                 cache_keys_to_check
                             );
 
                             for cache_key in &cache_keys_to_check {
-                                debug!("🗑️ [MUTATION] Invalidating cache key: {}", cache_key);
+                                crate::debug_log!("🗑️ [MUTATION] Invalidating cache key: {}", cache_key);
                                 cache.invalidate(cache_key);
                                 refresh_registry.trigger_refresh(cache_key);
                             }
                         }
                     }
                     Err(_) => {
-                        debug!("❌ [MUTATION] Mutation failed: {}", mutation.id());
+                        crate::debug_log!("❌ [MUTATION] Mutation failed: {}", mutation.id());
 
                         if is_optimistic && !optimistic_updates_for_rollback.is_empty() {
-                            debug!(
+                            crate::debug_log!(
                                 "🔄 [ROLLBACK] Rolling back {} optimistic updates",
                                 optimistic_updates_for_rollback.len()
                             );
 
                             for (cache_key, _) in &optimistic_updates_for_rollback {
-                                debug!(
+                                crate::debug_log!(
                                     "🔄 [ROLLBACK] Rolling back optimistic update for cache key: {}",
                                     cache_key
                                 );
@@ -492,7 +493,7 @@ where
                 }
 
                 if result_tx.send(mutation_result).is_err() {
-                    debug!(
+                    crate::debug_log!(
                         "⚠️ [MUTATION] Result receiver dropped before completion for: {}",
                         mutation.id()
                     );

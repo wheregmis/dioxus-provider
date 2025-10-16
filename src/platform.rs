@@ -73,9 +73,9 @@ pub mod task {
         F: std::future::Future<Output = ()> + 'static,
     {
         dioxus_spawn(async move {
-            tracing::debug!("Starting task: {}", name);
+            crate::debug_log!("Starting task: {}", name);
             future.await;
-            tracing::debug!("Completed task: {}", name);
+            crate::debug_log!("Completed task: {}", name);
         });
     }
 }

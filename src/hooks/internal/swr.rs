@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use std::time::Duration;
+#[cfg(feature = "tracing")]
 use tracing::debug;
 
 use crate::{cache::ProviderCache, refresh::RefreshRegistry, types::ProviderParamBounds};
@@ -35,7 +36,7 @@ pub fn check_and_handle_swr_core<P, Param>(
                 {
                     // Data is stale but not expired and no revalidation in progress - trigger background revalidation
                     if refresh_registry.start_revalidation(cache_key) {
-                        debug!(
+                        crate::debug_log!(
                             "🔄 [SWR] Data is stale for key: {} - triggering background revalidation",
                             cache_key
                         );
@@ -52,12 +53,12 @@ pub fn check_and_handle_swr_core<P, Param>(
                             refresh_registry_clone.complete_revalidation(&cache_key_clone);
                             if updated {
                                 refresh_registry_clone.trigger_refresh(&cache_key_clone);
-                                debug!(
+                                crate::debug_log!(
                                     "✅ [SWR] Background revalidation completed for key: {} (value changed)",
                                     cache_key_clone
                                 );
                             } else {
-                                debug!(
+                                crate::debug_log!(
                                     "✅ [SWR] Background revalidation completed for key: {} (value unchanged)",
                                     cache_key_clone
                                 );

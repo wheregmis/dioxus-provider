@@ -6,12 +6,17 @@ pub mod errors;
 pub mod global;
 pub mod hooks;
 pub mod injection;
+mod log_utils;
 pub mod mutation;
 pub mod param_utils;
 pub mod platform;
 mod provider_state;
 pub mod refresh;
 pub mod types;
+
+// Re-export commonly used items at crate root for convenience
+pub use global::ProviderConfig;
+pub use global::init;
 
 pub mod prelude {
     //! The prelude exports all the most common types and functions for using dioxus-provider.

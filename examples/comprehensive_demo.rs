@@ -17,7 +17,7 @@
 
 use dioxus::prelude::*;
 use dioxus_provider::hooks::ProviderState;
-use dioxus_provider::{global::init_global_providers, prelude::*};
+use dioxus_provider::prelude::*;
 use std::{
     sync::atomic::{AtomicU32, Ordering},
     time::Duration,
@@ -981,7 +981,7 @@ fn app() -> Element {
 
 fn main() {
     // Initialize global providers for application-wide cache management
-    init_global_providers();
+    let _ = dioxus_provider::init();
 
     println!("🚀 Starting Comprehensive Cache Test with Global Providers");
     println!("🌐 Using global provider management - no context wrappers needed!");

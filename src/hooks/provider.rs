@@ -31,6 +31,7 @@ use dioxus::{
     prelude::*,
 };
 use std::{fmt::Debug, future::Future, time::Duration};
+#[cfg(feature = "tracing")]
 use tracing::debug;
 
 use crate::{
@@ -403,7 +404,8 @@ where
     let _execution_memo = use_memo(use_reactive!(|(provider, param)| {
         let cache_key = provider.id(&param);
 
-        debug!(
+        #[cfg(feature = "tracing")]
+        crate::debug_log!(
             "🔄 [USE_PROVIDER] Memo executing for key: {} with param: {:?}",
             cache_key, param
         );
@@ -428,7 +430,7 @@ where
         // Check cache for valid data
         if let Some(cached_result) = cache.get::<Result<P::Output, P::Error>>(&cache_key) {
             // Access tracking is automatically handled by cache.get() updating last_accessed time
-            debug!("📊 [CACHE-HIT] Serving cached data for: {}", cache_key);
+            crate::debug_log!("📊 [CACHE-HIT] Serving cached data for: {}", cache_key);
 
             match cached_result {
                 Ok(data) => {
@@ -456,7 +458,7 @@ where
         let task = spawn(async move {
             let result = provider.run(param).await;
             let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
-            debug!(
+            crate::debug_log!(
                 "📊 [CACHE-STORE] Attempted to store new data for: {} (updated: {})",
                 cache_key_clone, updated
             );

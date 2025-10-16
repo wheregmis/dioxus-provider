@@ -24,6 +24,9 @@ use std::{
     },
     time::Duration,
 };
+
+#[cfg(feature = "tracing")]
+#[cfg(feature = "tracing")]
 use tracing::debug;
 
 use crate::platform::{DEFAULT_MAX_CACHE_SIZE, DEFAULT_UNUSED_THRESHOLD};
@@ -326,7 +329,8 @@ impl ProviderCache {
                 // Remove expired entry
                 if let Ok(mut cache) = self.cache.lock() {
                     cache.remove(key);
-                    debug!(
+                    #[cfg(feature = "tracing")]
+                    crate::debug_log!(
                         "🗑️ [CACHE-EXPIRATION] Removing expired cache entry for key: {}",
                         key
                     );
@@ -395,7 +399,7 @@ impl ProviderCache {
         if is_expired {
             if let Ok(mut cache) = self.cache.lock() {
                 cache.remove(key);
-                debug!(
+                crate::debug_log!(
                     "🗑️ [CACHE-EXPIRATION] Removing expired cache entry for key: {}",
                     key
                 );
@@ -483,14 +487,14 @@ impl ProviderCache {
                 && existing_value == value
             {
                 existing_entry.refresh_timestamp();
-                debug!(
+                crate::debug_log!(
                     "⏸️ [CACHE-STORE] Value unchanged for key: {}, refreshing timestamp",
                     key
                 );
                 return false;
             }
             cache.insert(key.clone(), CacheEntry::new(value));
-            debug!("📊 [CACHE-STORE] Stored data for key: {}", key);
+            crate::debug_log!("📊 [CACHE-STORE] Stored data for key: {}", key);
             return true;
         }
         false
@@ -530,7 +534,8 @@ impl ProviderCache {
     /// The entry is removed from the cache.
     pub fn invalidate(&self, key: &str) {
         self.remove(key);
-        debug!(
+        #[cfg(feature = "tracing")]
+        crate::debug_log!(
             "🗑️ [CACHE-INVALIDATE] Invalidated cache entry for key: {}",
             key
         );
@@ -549,7 +554,7 @@ impl ProviderCache {
         if let Ok(mut cache) = self.cache.lock() {
             let count = cache.len();
             cache.clear();
-            debug!("🗑️ [CACHE-CLEAR] Cleared {} cache entries", count);
+            crate::debug_log!("🗑️ [CACHE-CLEAR] Cleared {} cache entries", count);
         }
     }
 
@@ -590,13 +595,13 @@ impl ProviderCache {
             cache.retain(|key, entry| {
                 let should_keep = !entry.is_unused_for(unused_threshold);
                 if !should_keep {
-                    debug!("🧹 [CACHE-CLEANUP] Removing unused entry: {}", key);
+                    crate::debug_log!("🧹 [CACHE-CLEANUP] Removing unused entry: {}", key);
                 }
                 should_keep
             });
             let removed = initial_size - cache.len();
             if removed > 0 {
-                debug!("🧹 [CACHE-CLEANUP] Removed {} unused entries", removed);
+                crate::debug_log!("🧹 [CACHE-CLEANUP] Removed {} unused entries", removed);
             }
             removed
         } else {
@@ -640,7 +645,7 @@ impl ProviderCache {
             cache.extend(to_keep);
 
             if evicted > 0 {
-                debug!(
+                crate::debug_log!(
                     "🗑️ [LRU-EVICT] Evicted {} entries due to cache size limit",
                     evicted
                 );

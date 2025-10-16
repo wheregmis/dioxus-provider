@@ -14,9 +14,15 @@ categories = ["gui", "asynchronous", "web-programming"]
 [workspace]
 members = [".", "dioxus-provider-macros"]
 
+[features]
+default = ["tracing"]
+# Enable tracing/logging support
+tracing = ["dep:tracing"]
+# Enable plain logging without emoji decorations (requires tracing feature)
+plain-logs = ["tracing"]
 
 [dependencies]
-dioxus = { version = "0.7.0-rc.0", default-features = false, features = [
+dioxus = { version = "0.7.0-rc.2", default-features = false, features = [
     "macro",
     "hooks",
     "signals",
@@ -24,14 +30,14 @@ dioxus = { version = "0.7.0-rc.0", default-features = false, features = [
 # dioxus-provider-macros = { version = "0.1.1" }
 dioxus-provider-macros = { version = "0.1.2", path = "./dioxus-provider-macros" }
 futures = "0.3"
-tracing = "0.1.41"
-thiserror = "2.0.16"
+tracing = { version = "0.1.41", optional = true }
+thiserror = "2.0.17"
 serde = { version = "1.0.226", features = ["derive"] }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Desktop/server tokio with more features
-tokio = { version = "1.47.1", features = [
+tokio = { version = "1.48.0", features = [
     "sync",
     "time",
     "rt",
@@ -54,11 +60,11 @@ serde_json = { version = "1.0.145", features = ["std"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # Desktop-only dependencies for examples
-dioxus = { version = "0.7.0-alpha.3", features = ["desktop"] }
+dioxus = { version = "0.7.0-rc.2", features = ["desktop"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 # Web-only dependencies for examples
-dioxus = { version = "0.7.0-alpha.3", features = ["web"] }
+dioxus = { version = "0.7.0-rc.2", features = ["web"] }
 
 
 [profile]

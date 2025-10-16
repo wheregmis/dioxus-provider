@@ -126,7 +126,7 @@ pub struct BusinessMetrics {
 
 fn main() {
     // Initialize global providers for application-wide cache management
-    dioxus_provider::global::init_global_providers();
+    dioxus_provider::init();
 
     println!("🚀 Starting Interval Refresh Demo");
     println!("⏰ Demonstrating automatic background data refresh at configurable intervals");

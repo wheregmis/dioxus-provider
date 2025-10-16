@@ -200,26 +200,9 @@ pub fn reset_global_providers() {
     panic!("Global provider reset is not currently supported. Restart the application.");
 }
 
-// Backward compatibility functions that panic for existing code
-#[deprecated(
-    since = "0.0.7",
-    note = "Use get_global_cache() with error handling instead"
-)]
-pub fn get_global_cache_panic() -> &'static ProviderCache {
-    GLOBAL_CACHE
-        .get()
-        .expect("Global providers not initialized. Call init_global_providers() first.")
-}
-
-#[deprecated(
-    since = "0.0.7",
-    note = "Use get_global_refresh_registry() with error handling instead"
-)]
-pub fn get_global_refresh_registry_panic() -> &'static RefreshRegistry {
-    GLOBAL_REFRESH_REGISTRY
-        .get()
-        .expect("Global providers not initialized. Call init_global_providers() first.")
-}
+// Note: Deprecated functions get_global_cache_panic() and get_global_refresh_registry_panic()
+// have been removed in version 0.1.0. Use get_global_cache() and get_global_refresh_registry()
+// with proper error handling instead.
 
 #[cfg(test)]
 mod tests {
@@ -259,11 +242,11 @@ mod tests {
     }
 
     #[test]
-    fn test_backward_compatibility() {
-        // Test that the old panic functions still work when initialized
-        init_global_providers().unwrap();
+    fn test_get_functions_with_error_handling() {
+        // Test that get functions work with proper error handling
+        init().unwrap();
 
-        let _cache = get_global_cache_panic();
-        let _refresh = get_global_refresh_registry_panic();
+        let _cache = get_global_cache().unwrap();
+        let _refresh = get_global_refresh_registry().unwrap();
     }
 }

@@ -2,6 +2,7 @@
 
 use dioxus::prelude::*;
 use std::time::Duration;
+#[cfg(feature = "tracing")]
 use tracing::debug;
 
 use crate::{
@@ -123,7 +124,7 @@ pub fn setup_cache_expiration_task_core<P, Param>(
                 if let Ok(mut cache_lock) = cache_clone.cache.lock() {
                     if let Some(entry) = cache_lock.get(&cache_key_clone) {
                         if entry.is_expired(expiration) {
-                            debug!(
+                            crate::debug_log!(
                                 "🗑️ [AUTO-EXPIRATION] Cache expired for key: {} - triggering reactive refresh",
                                 cache_key_clone
                             );
@@ -169,7 +170,7 @@ pub fn setup_cache_expiration_task_core<P, Param>(
                 if let Ok(mut cache_lock) = cache_clone.cache.lock() {
                     if let Some(entry) = cache_lock.get(&cache_key_clone) {
                         if entry.is_expired(expiration) {
-                            debug!(
+                            crate::debug_log!(
                                 "🗑️ [AUTO-EXPIRATION] Cache expired for key: {} - triggering reactive refresh",
                                 cache_key_clone
                             );
@@ -261,7 +262,7 @@ pub fn check_and_handle_cache_expiration(
         let should_trigger_refresh = if let Ok(mut cache_lock) = cache.cache.lock() {
             if let Some(entry) = cache_lock.get(cache_key) {
                 if entry.is_expired(expiration) {
-                    debug!(
+                    crate::debug_log!(
                         "🗑️ [CACHE EXPIRATION] Removing expired cache entry for key: {}",
                         cache_key
                     );

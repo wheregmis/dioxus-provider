@@ -196,6 +196,6 @@ pub fn App() -> Element {
 }
 
 fn main() {
-    let _ = dioxus_provider::global::init_global_providers();
+    let _ = dioxus_provider::init();
     dioxus::launch(App);
 }
