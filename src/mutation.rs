@@ -36,6 +36,37 @@ pub enum MutationState<T, E> {
     Error(E),
 }
 
+impl<T, E> crate::provider_state::AsyncState for MutationState<T, E> {
+    type Data = T;
+    type Error = E;
+
+    fn is_loading(&self) -> bool {
+        matches!(self, MutationState::Loading)
+    }
+
+    fn is_success(&self) -> bool {
+        matches!(self, MutationState::Success(_))
+    }
+
+    fn is_error(&self) -> bool {
+        matches!(self, MutationState::Error(_))
+    }
+
+    fn data(&self) -> Option<&T> {
+        match self {
+            MutationState::Success(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    fn error(&self) -> Option<&E> {
+        match self {
+            MutationState::Error(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
 impl<T, E> MutationState<T, E> {
     /// Returns true if the mutation is idle
     pub fn is_idle(&self) -> bool {
@@ -44,33 +75,27 @@ impl<T, E> MutationState<T, E> {
 
     /// Returns true if the mutation is currently loading
     pub fn is_loading(&self) -> bool {
-        matches!(self, MutationState::Loading)
+        <Self as crate::provider_state::AsyncState>::is_loading(self)
     }
 
     /// Returns true if the mutation completed successfully
     pub fn is_success(&self) -> bool {
-        matches!(self, MutationState::Success(_))
+        <Self as crate::provider_state::AsyncState>::is_success(self)
     }
 
     /// Returns true if the mutation failed
     pub fn is_error(&self) -> bool {
-        matches!(self, MutationState::Error(_))
+        <Self as crate::provider_state::AsyncState>::is_error(self)
     }
 
     /// Returns the success data if available
     pub fn data(&self) -> Option<&T> {
-        match self {
-            MutationState::Success(data) => Some(data),
-            _ => None,
-        }
+        <Self as crate::provider_state::AsyncState>::data(self)
     }
 
     /// Returns the error if available
     pub fn error(&self) -> Option<&E> {
-        match self {
-            MutationState::Error(error) => Some(error),
-            _ => None,
-        }
+        <Self as crate::provider_state::AsyncState>::error(self)
     }
 }
 
@@ -103,7 +128,7 @@ impl<'a, Data, Error> MutationContext<'a, Data, Error> {
     where
         Data: Clone,
     {
-        self.current_success().cloned()
+        self.current()?.as_ref().ok().cloned()
     }
 
     /// Applies a transformation to the cloned cached data and returns the updated value.
@@ -115,6 +140,73 @@ impl<'a, Data, Error> MutationContext<'a, Data, Error> {
         let mut cloned = self.cloned_success()?;
         f(&mut cloned);
         Some(cloned)
+    }
+
+    /// Applies a transformation to the cloned cached data, or returns a default value if no data is available.
+    ///
+    /// This is useful when you need to ensure a value is always returned, even if the cache is empty.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// use dioxus_provider::prelude::*;
+    ///
+    /// #[mutation(invalidates = [fetch_items])]
+    /// async fn add_item(
+    ///     item: String,
+    ///     ctx: MutationContext<Vec<String>, String>,
+    /// ) -> Result<Vec<String>, String> {
+    ///     Ok(ctx.map_or_else(
+    ///         || vec![item.clone()],  // default if no cached data
+    ///         |items| {
+    ///             items.push(item.clone());
+    ///         }
+    ///     ))
+    /// }
+    /// ```
+    pub fn map_or_else<F, D>(&self, default: D, f: F) -> Data
+    where
+        Data: Clone,
+        F: FnOnce(&mut Data),
+        D: FnOnce() -> Data,
+    {
+        self.map_current(f).unwrap_or_else(default)
+    }
+
+    /// Updates the cached data in place, returning the modified data or None if no data exists.
+    ///
+    /// This is similar to `map_current` but provides a more explicit name for mutations
+    /// that modify existing data.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,no_run
+    /// use dioxus_provider::prelude::*;
+    ///
+    /// #[mutation(invalidates = [fetch_counter])]
+    /// async fn increment_counter(
+    ///     ctx: MutationContext<i32, String>,
+    /// ) -> Result<i32, String> {
+    ///     ctx.update_in_place(|count| *count += 1)
+    ///         .ok_or_else(|| "No counter data available".to_string())
+    /// }
+    /// ```
+    pub fn update_in_place<F>(&self, f: F) -> Option<Data>
+    where
+        Data: Clone,
+        F: FnOnce(&mut Data),
+    {
+        self.map_current(f)
+    }
+
+    /// Returns true if there is currently cached data available.
+    pub fn has_data(&self) -> bool {
+        self.current_success().is_some()
+    }
+
+    /// Returns true if the current cache contains an error.
+    pub fn has_error(&self) -> bool {
+        matches!(self.current, Some(Err(_)))
     }
 }
 
@@ -208,6 +300,210 @@ pub type MutationHookResult<M, Input, F> = (
     F,
 );
 
+/// Configuration for mutation behavior
+#[derive(Clone, Debug)]
+struct MutationConfig {
+    /// Whether to apply optimistic updates
+    optimistic: bool,
+}
+
+impl MutationConfig {
+    /// Create a default mutation configuration (no optimistic updates)
+    fn default() -> Self {
+        Self { optimistic: false }
+    }
+
+    /// Create a mutation configuration with optimistic updates enabled
+    fn optimistic() -> Self {
+        Self { optimistic: true }
+    }
+}
+
+/// Core mutation logic shared between use_mutation and use_optimistic_mutation
+fn mutation_core<M, Input>(
+    mutation: M,
+    config: MutationConfig,
+) -> MutationHookResult<M, Input, impl Fn(Input) + Clone>
+where
+    M: Mutation<Input> + Send + Sync + 'static,
+    Input: Clone + PartialEq + Send + Sync + 'static,
+{
+    let state = use_signal(|| MutationState::Idle);
+    let cache = get_global_cache();
+    let refresh_registry = get_global_refresh_registry();
+
+    let mutate_fn = {
+        let mutation = mutation.clone();
+        let cache = cache
+            .unwrap_or_else(|_| {
+                panic!("Global providers not initialized. Call dioxus_provider::init() before using mutations.")
+            })
+            .clone();
+        let refresh_registry = refresh_registry
+            .unwrap_or_else(|_| {
+                panic!("Global providers not initialized. Call dioxus_provider::init() before using mutations.")
+            })
+            .clone();
+        let is_optimistic = config.optimistic;
+
+        move |input: Input| {
+            // Prevent concurrent optimistic mutations
+            if is_optimistic && matches!(*state.read(), MutationState::Loading) {
+                debug!(
+                    "⏸️ [MUTATION] Skipping mutation - already in progress for: {}",
+                    mutation.id()
+                );
+                return;
+            }
+
+            let mutation = mutation.clone();
+            let cache = cache.clone();
+            let refresh_registry = refresh_registry.clone();
+            let input = input.clone();
+            let mut ui_state = state;
+
+            // Set loading state
+            ui_state.set(MutationState::Loading);
+
+            // Collect optimistic updates if enabled
+            let cache_keys_to_check: Vec<String> = mutation.invalidates();
+            let mut optimistic_updates = Vec::new();
+
+            if is_optimistic {
+                for cache_key in &cache_keys_to_check {
+                    let current_data = cache.get::<Result<M::Output, M::Error>>(cache_key);
+                    let updates =
+                        mutation.optimistic_updates_with_current(&input, current_data.as_ref());
+                    optimistic_updates.extend(updates);
+                }
+
+                if optimistic_updates.is_empty() {
+                    optimistic_updates = mutation.optimistic_updates(&input);
+                }
+
+                if !optimistic_updates.is_empty() {
+                    debug!(
+                        "⚡ [OPTIMISTIC] Optimistically updating {} cache entries",
+                        optimistic_updates.len()
+                    );
+                    for (cache_key, optimistic_result) in &optimistic_updates {
+                        cache.set(cache_key.clone(), optimistic_result.clone());
+                        refresh_registry.trigger_refresh(cache_key);
+                    }
+                }
+            }
+
+            let optimistic_updates_for_rollback = optimistic_updates.clone();
+            let (result_tx, result_rx) = oneshot::channel::<Result<M::Output, M::Error>>();
+
+            spawn({
+                let mut state = ui_state;
+                async move {
+                    if let Ok(outcome) = result_rx.await {
+                        match outcome {
+                            Ok(result) => state.set(MutationState::Success(result)),
+                            Err(error) => state.set(MutationState::Error(error)),
+                        }
+                    }
+                }
+            });
+
+            dioxus_core::spawn_forever(async move {
+                let mutation_type = if is_optimistic {
+                    "optimistic mutation"
+                } else {
+                    "mutation"
+                };
+                debug!("🔄 [MUTATION] Starting {}: {}", mutation_type, mutation.id());
+
+                // Get current data for the mutation
+                let mutation_current_data = cache_keys_to_check
+                    .first()
+                    .and_then(|first_key| cache.get::<Result<M::Output, M::Error>>(first_key));
+
+                let mutation_result = mutation
+                    .mutate_with_current(input, mutation_current_data.as_ref())
+                    .await;
+
+                debug!(
+                    "📡 [MUTATION] Mutation completed for: {}, result: {}",
+                    mutation.id(),
+                    match &mutation_result {
+                        Ok(_) => "Success",
+                        Err(_) => "Error",
+                    }
+                );
+
+                match &mutation_result {
+                    Ok(result) => {
+                        debug!("✅ [MUTATION] Mutation succeeded: {}", mutation.id());
+
+                        if is_optimistic && !optimistic_updates_for_rollback.is_empty() {
+                            // Update optimistic caches with real result
+                            let mut final_keys: HashSet<String> =
+                                cache_keys_to_check.iter().cloned().collect();
+                            for (cache_key, _) in &optimistic_updates_for_rollback {
+                                final_keys.insert(cache_key.clone());
+                            }
+
+                            debug!(
+                                "📦 [MUTATION] Updating {} cache keys with mutation result",
+                                final_keys.len()
+                            );
+
+                            for cache_key in final_keys {
+                                cache.set(cache_key.clone(), Ok::<_, M::Error>(result.clone()));
+                                refresh_registry.trigger_refresh(&cache_key);
+                            }
+                        } else {
+                            // Standard cache invalidation
+                            debug!(
+                                "🔄 [MUTATION] Invalidating {} cache keys: {:?}",
+                                cache_keys_to_check.len(),
+                                cache_keys_to_check
+                            );
+
+                            for cache_key in &cache_keys_to_check {
+                                debug!("🗑️ [MUTATION] Invalidating cache key: {}", cache_key);
+                                cache.invalidate(cache_key);
+                                refresh_registry.trigger_refresh(cache_key);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        debug!("❌ [MUTATION] Mutation failed: {}", mutation.id());
+
+                        if is_optimistic && !optimistic_updates_for_rollback.is_empty() {
+                            debug!(
+                                "🔄 [ROLLBACK] Rolling back {} optimistic updates",
+                                optimistic_updates_for_rollback.len()
+                            );
+
+                            for (cache_key, _) in &optimistic_updates_for_rollback {
+                                debug!(
+                                    "🔄 [ROLLBACK] Rolling back optimistic update for cache key: {}",
+                                    cache_key
+                                );
+                                cache.invalidate(cache_key);
+                                refresh_registry.trigger_refresh(cache_key);
+                            }
+                        }
+                    }
+                }
+
+                if result_tx.send(mutation_result).is_err() {
+                    debug!(
+                        "⚠️ [MUTATION] Result receiver dropped before completion for: {}",
+                        mutation.id()
+                    );
+                }
+            });
+        }
+    };
+
+    (state, mutate_fn)
+}
+
 /// Hook to create a mutation that can be triggered manually
 ///
 /// Returns a tuple containing:
@@ -250,88 +546,7 @@ where
     M: Mutation<Input> + Send + Sync + 'static,
     Input: Clone + PartialEq + Send + Sync + 'static,
 {
-    let state = use_signal(|| MutationState::Idle);
-    let cache = get_global_cache();
-    let refresh_registry = get_global_refresh_registry();
-
-    let mutate_fn = {
-        let mutation = mutation.clone();
-        let cache = cache.expect("Global providers not initialized").clone();
-        let refresh_registry = refresh_registry
-            .expect("Global providers not initialized")
-            .clone();
-        let state = state;
-
-        move |input: Input| {
-            let mutation = mutation.clone();
-            let cache = cache.clone();
-            let refresh_registry = refresh_registry.clone();
-            let input = input.clone();
-            let mut ui_state = state;
-
-            // Keep UI state updates in the component scope and run the mutation itself in the root scope.
-            ui_state.set(MutationState::Loading);
-
-            let (result_tx, result_rx) = oneshot::channel::<Result<M::Output, M::Error>>();
-
-            spawn({
-                let mut state = ui_state;
-                async move {
-                    if let Ok(outcome) = result_rx.await {
-                        match outcome {
-                            Ok(result) => state.set(MutationState::Success(result)),
-                            Err(error) => state.set(MutationState::Error(error)),
-                        }
-                    }
-                }
-            });
-
-            dioxus_core::spawn_forever(async move {
-                debug!("🔄 [MUTATION] Starting mutation: {}", mutation.id());
-
-                // Get current data for the mutation
-                let cache_keys_to_check: Vec<String> = mutation.invalidates();
-                let mutation_current_data = if let Some(first_key) = cache_keys_to_check.get(0) {
-                    cache.get::<Result<M::Output, M::Error>>(first_key)
-                } else {
-                    None
-                };
-
-                let outcome = mutation
-                    .mutate_with_current(input, mutation_current_data.as_ref())
-                    .await;
-
-                debug!(
-                    "📡 [MUTATION] Mutation completed for: {}, result: {}",
-                    mutation.id(),
-                    match &outcome {
-                        Ok(_) => "Success",
-                        Err(_) => "Error",
-                    }
-                );
-
-                if let Ok(_) = &outcome {
-                    debug!("✅ [MUTATION] Mutation succeeded: {}", mutation.id());
-                    for cache_key in &cache_keys_to_check {
-                        debug!("🗑️ [MUTATION] Invalidating cache key: {}", cache_key);
-                        cache.invalidate(cache_key);
-                        refresh_registry.trigger_refresh(cache_key);
-                    }
-                } else if let Err(_) = &outcome {
-                    debug!("❌ [MUTATION] Mutation failed: {}", mutation.id());
-                }
-
-                if result_tx.send(outcome).is_err() {
-                    debug!(
-                        "⚠️ [MUTATION] Result receiver dropped before completion for: {}",
-                        mutation.id()
-                    );
-                }
-            });
-        }
-    };
-
-    (state, mutate_fn)
+    mutation_core(mutation, MutationConfig::default())
 }
 
 /// Hook to create a mutation with optimistic invalidation
@@ -371,176 +586,7 @@ where
     M: Mutation<Input> + Send + Sync + 'static,
     Input: Clone + PartialEq + Send + Sync + 'static,
 {
-    let state = use_signal(|| MutationState::Idle);
-    let cache = get_global_cache();
-    let refresh_registry = get_global_refresh_registry();
-
-    let mutate_fn = {
-        let mutation = mutation.clone();
-        let cache = cache.expect("Global providers not initialized").clone();
-        let refresh_registry = refresh_registry
-            .expect("Global providers not initialized")
-            .clone();
-        let state = state;
-
-        move |input: Input| {
-            // Prevent concurrent mutations by checking if one is already running
-            if matches!(*state.read(), MutationState::Loading) {
-                debug!(
-                    "⏸️ [MUTATION] Skipping mutation - already in progress for: {}",
-                    mutation.id()
-                );
-                return;
-            }
-
-            let mutation = mutation.clone();
-            let cache = cache.clone();
-            let refresh_registry = refresh_registry.clone();
-            let input = input.clone();
-            let mut ui_state = state;
-            ui_state.set(MutationState::Loading);
-
-            // Collect optimistic updates in the component scope so they apply immediately.
-            let cache_keys_to_check: Vec<String> = mutation.invalidates();
-            let mut optimistic_updates = Vec::new();
-
-            for cache_key in &cache_keys_to_check {
-                let current_data = cache.get::<Result<M::Output, M::Error>>(cache_key);
-                let updates =
-                    mutation.optimistic_updates_with_current(&input, current_data.as_ref());
-                optimistic_updates.extend(updates);
-            }
-
-            if optimistic_updates.is_empty() {
-                optimistic_updates = mutation.optimistic_updates(&input);
-            }
-
-            if !optimistic_updates.is_empty() {
-                debug!(
-                    "⚡ [OPTIMISTIC] Optimistically updating {} cache entries",
-                    optimistic_updates.len()
-                );
-                for (cache_key, optimistic_result) in &optimistic_updates {
-                    cache.set(cache_key.clone(), optimistic_result.clone());
-                    refresh_registry.trigger_refresh(cache_key);
-                }
-            }
-
-            let optimistic_updates_for_rollback = optimistic_updates.clone();
-            let (result_tx, result_rx) = oneshot::channel::<Result<M::Output, M::Error>>();
-
-            spawn({
-                let mut state = ui_state;
-                async move {
-                    if let Ok(outcome) = result_rx.await {
-                        match outcome {
-                            Ok(result) => state.set(MutationState::Success(result)),
-                            Err(error) => state.set(MutationState::Error(error)),
-                        }
-                    }
-                }
-            });
-
-            dioxus_core::spawn_forever(async move {
-                debug!(
-                    "🔄 [MUTATION] Starting optimistic mutation: {}",
-                    mutation.id()
-                );
-
-                // Get current data for the mutation
-                let mutation_current_data = if let Some(first_key) = cache_keys_to_check.get(0) {
-                    cache.get::<Result<M::Output, M::Error>>(first_key)
-                } else {
-                    None
-                };
-
-                let mutation_result = mutation
-                    .mutate_with_current(input, mutation_current_data.as_ref())
-                    .await;
-
-                debug!(
-                    "📡 [MUTATION] Mutation completed for: {}, result: {}",
-                    mutation.id(),
-                    match &mutation_result {
-                        Ok(_) => "Success",
-                        Err(_) => "Error",
-                    }
-                );
-
-                match &mutation_result {
-                    Ok(result) => {
-                        debug!(
-                            "✅ [MUTATION] Optimistic mutation succeeded: {}",
-                            mutation.id()
-                        );
-
-                        if optimistic_updates_for_rollback.is_empty() {
-                            debug!(
-                                "🔄 [MUTATION] Invalidating {} cache keys: {:?}",
-                                cache_keys_to_check.len(),
-                                cache_keys_to_check
-                            );
-
-                            for cache_key in &cache_keys_to_check {
-                                debug!("🗑️ [MUTATION] Invalidating cache key: {}", cache_key);
-                                cache.invalidate(cache_key);
-                                refresh_registry.trigger_refresh(cache_key);
-                                debug!(
-                                    "✅ [MUTATION] Cache invalidation completed for: {}",
-                                    cache_key
-                                );
-                            }
-                        } else {
-                            let mut final_keys: HashSet<String> =
-                                cache_keys_to_check.iter().cloned().collect();
-                            for (cache_key, _) in &optimistic_updates_for_rollback {
-                                final_keys.insert(cache_key.clone());
-                            }
-
-                            debug!(
-                                "📦 [MUTATION] Updating {} cache keys with mutation result",
-                                final_keys.len()
-                            );
-
-                            for cache_key in final_keys {
-                                cache.set(cache_key.clone(), Ok::<_, M::Error>(result.clone()));
-                                refresh_registry.trigger_refresh(&cache_key);
-                            }
-                        }
-                    }
-                    Err(_) => {
-                        debug!(
-                            "❌ [MUTATION] Optimistic mutation failed: {}",
-                            mutation.id()
-                        );
-
-                        debug!(
-                            "🔄 [ROLLBACK] Rolling back {} optimistic updates",
-                            optimistic_updates_for_rollback.len()
-                        );
-
-                        for (cache_key, _) in &optimistic_updates_for_rollback {
-                            debug!(
-                                "🔄 [ROLLBACK] Rolling back optimistic update for cache key: {}",
-                                cache_key
-                            );
-                            cache.invalidate(cache_key);
-                            refresh_registry.trigger_refresh(cache_key);
-                        }
-                    }
-                }
-
-                if result_tx.send(mutation_result).is_err() {
-                    debug!(
-                        "⚠️ [MUTATION] Result receiver dropped before completion for: {}",
-                        mutation.id()
-                    );
-                }
-            });
-        }
-    };
-
-    (state, mutate_fn)
+    mutation_core(mutation, MutationConfig::optimistic())
 }
 
 /// Helper function to create cache keys for providers with parameters

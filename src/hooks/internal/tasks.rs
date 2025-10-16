@@ -10,7 +10,8 @@ use crate::{
     types::ProviderParamBounds,
 };
 
-use super::{Provider, swr::check_and_handle_swr_core};
+use super::super::Provider;
+use super::swr::check_and_handle_swr_core;
 
 /// Minimum interval for periodic tasks to prevent busy spinning
 const MIN_TASK_INTERVAL: Duration = Duration::from_millis(1);

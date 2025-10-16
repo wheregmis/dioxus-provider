@@ -1,12 +1,10 @@
 //! Provider hooks and utilities for Dioxus applications
 
 // Internal helper modules
-mod cache_mgmt;
-mod swr;
-mod tasks;
+mod internal;
 
 // Main hooks implementation
-mod main;
+mod provider;
 
-// Re-export everything from main
-pub use main::*;
+// Re-export everything from provider
+pub use provider::*;

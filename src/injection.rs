@@ -105,6 +105,14 @@ impl DependencyRegistry {
 }
 
 /// Initialize the global dependency registry
+///
+/// # Deprecated
+/// Use `init()` or `ProviderConfig::new().with_dependency_injection().init()` instead.
+/// The new initialization system automatically handles dependency injection setup.
+#[deprecated(
+    since = "0.1.0",
+    note = "Use init() or ProviderConfig::new().with_dependency_injection().init() instead"
+)]
 pub fn init_dependency_injection() {
     DEPENDENCY_REGISTRY.get_or_init(DependencyRegistry::new);
 }

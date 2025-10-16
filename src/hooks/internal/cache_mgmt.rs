@@ -9,7 +9,7 @@ use crate::{
     types::ProviderParamBounds,
 };
 
-use super::Provider;
+use super::super::Provider;
 
 /// Sets up intelligent cache management for a provider
 ///

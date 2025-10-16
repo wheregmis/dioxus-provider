@@ -42,10 +42,10 @@ use crate::{
 use crate::param_utils::IntoProviderParam;
 use crate::types::{ProviderErrorBounds, ProviderOutputBounds, ProviderParamBounds};
 
-// Import helper functions from sibling modules
-use super::cache_mgmt::setup_intelligent_cache_management;
-use super::swr::check_and_handle_swr_core;
-use super::tasks::{
+// Import helper functions from internal modules
+use super::internal::cache_mgmt::setup_intelligent_cache_management;
+use super::internal::swr::check_and_handle_swr_core;
+use super::internal::tasks::{
     check_and_handle_cache_expiration, setup_cache_expiration_task_core, setup_interval_task_core,
     setup_stale_check_task_core,
 };
@@ -192,14 +192,18 @@ impl<T: Clone + 'static, E: Clone + 'static> SuspenseSignalExt<T, E>
 /// Get the provider cache - requires global providers to be initialized
 fn get_provider_cache() -> ProviderCache {
     get_global_cache()
-        .expect("Global providers not initialized")
+        .unwrap_or_else(|_| {
+            panic!("Global providers not initialized. Call dioxus_provider::init() before using providers.")
+        })
         .clone()
 }
 
 /// Get the refresh registry - requires global providers to be initialized
 fn get_refresh_registry() -> RefreshRegistry {
     get_global_refresh_registry()
-        .expect("Global providers not initialized")
+        .unwrap_or_else(|_| {
+            panic!("Global providers not initialized. Call dioxus_provider::init() before using providers.")
+        })
         .clone()
 }
 

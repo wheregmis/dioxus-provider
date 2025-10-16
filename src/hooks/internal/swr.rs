@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::{cache::ProviderCache, refresh::RefreshRegistry, types::ProviderParamBounds};
 
-use super::Provider;
+use super::super::Provider;
 
 /// Check and handle stale-while-revalidate logic
 ///
