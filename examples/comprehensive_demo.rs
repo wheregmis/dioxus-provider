@@ -981,7 +981,10 @@ fn app() -> Element {
 
 fn main() {
     // Initialize global providers for application-wide cache management
-    let _ = dioxus_provider::init();
+    if let Err(err) = dioxus_provider::init() {
+        eprintln!("❌ Failed to initialize dioxus_provider: {err}");
+        std::process::exit(1);
+    }
 
     println!("🚀 Starting Comprehensive Cache Test with Global Providers");
     println!("🌐 Using global provider management - no context wrappers needed!");
