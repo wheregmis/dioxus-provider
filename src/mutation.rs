@@ -450,20 +450,38 @@ where
 
                         if is_optimistic && !optimistic_updates_for_rollback.is_empty() {
                             // Update optimistic caches with real result
-                            let mut final_keys: HashSet<String> =
-                                cache_keys_to_check.iter().cloned().collect();
-                            for (cache_key, _) in &optimistic_updates_for_rollback {
-                                final_keys.insert(cache_key.clone());
-                            }
+                            let optimistic_keys: HashSet<String> = optimistic_updates_for_rollback
+                                .iter()
+                                .map(|(key, _)| key.clone())
+                                .collect();
 
                             crate::debug_log!(
-                                "📦 [MUTATION] Updating {} cache keys with mutation result",
-                                final_keys.len()
+                                "📦 [MUTATION] Updating {} optimistic cache entries with mutation result",
+                                optimistic_keys.len()
                             );
 
-                            for cache_key in final_keys {
+                            for cache_key in &optimistic_keys {
                                 cache.set(cache_key.clone(), Ok::<_, M::Error>(result.clone()));
-                                refresh_registry.trigger_refresh(&cache_key);
+                                refresh_registry.trigger_refresh(cache_key);
+                            }
+
+                            let invalidation_keys: Vec<_> = cache_keys_to_check
+                                .iter()
+                                .filter(|key| !optimistic_keys.contains(*key))
+                                .cloned()
+                                .collect();
+
+                            if !invalidation_keys.is_empty() {
+                                crate::debug_log!(
+                                    "🔄 [MUTATION] Invalidating {} cache keys: {:?}",
+                                    invalidation_keys.len(),
+                                    invalidation_keys
+                                );
+
+                                for cache_key in invalidation_keys {
+                                    cache.invalidate(&cache_key);
+                                    refresh_registry.trigger_refresh(&cache_key);
+                                }
                             }
                         } else {
                             // Standard cache invalidation
