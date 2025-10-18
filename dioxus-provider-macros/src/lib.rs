@@ -857,10 +857,9 @@ fn split_mutation_params(
     Ok((input_params, context_param, data_param))
 }
 
-/// Compare two types for equality (simplified version)
+/// Compare two types for structural equality
 fn types_equal(ty1: &Type, ty2: &Type) -> bool {
-    // Simple string comparison for now
-    quote!(#ty1).to_string() == quote!(#ty2).to_string()
+    ty1 == ty2
 }
 
 /// Extract provider information from the input function
