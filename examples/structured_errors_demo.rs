@@ -248,8 +248,8 @@ fn App() -> Element {
 }
 
 fn main() {
-    init_global_providers();
-    init_dependency_injection();
+    // Initialize provider system with dependency injection
+    dioxus_provider::init();
 
     register_dependency(ApiClient::new("https://api.example.com".to_string())).unwrap();
 

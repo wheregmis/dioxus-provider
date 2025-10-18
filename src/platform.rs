@@ -68,14 +68,14 @@ pub mod task {
     }
 
     /// Spawn a task with a name for debugging
-    pub fn spawn_named<F>(name: &'static str, future: F)
+    pub fn spawn_named<F>(#[allow(unused_variables)] name: &'static str, future: F)
     where
         F: std::future::Future<Output = ()> + 'static,
     {
         dioxus_spawn(async move {
-            tracing::debug!("Starting task: {}", name);
+            crate::debug_log!("Starting task: {}", name);
             future.await;
-            tracing::debug!("Completed task: {}", name);
+            crate::debug_log!("Completed task: {}", name);
         });
     }
 }

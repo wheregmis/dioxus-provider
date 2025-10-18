@@ -200,7 +200,7 @@ async fn fetch_user_with_permissions(
 #[component]
 fn App() -> Element {
     // Initialize global providers for dependency injection
-    init_global_providers();
+    dioxus_provider::init();
 
     // State for demonstration
     let mut user_id = use_signal(|| 1u32);

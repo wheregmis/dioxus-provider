@@ -31,7 +31,7 @@ use dioxus::{
     prelude::*,
 };
 use std::{fmt::Debug, future::Future, time::Duration};
-use tracing::debug;
+
 
 use crate::{
     cache::ProviderCache,
@@ -42,10 +42,10 @@ use crate::{
 use crate::param_utils::IntoProviderParam;
 use crate::types::{ProviderErrorBounds, ProviderOutputBounds, ProviderParamBounds};
 
-// Import helper functions from sibling modules
-use super::cache_mgmt::setup_intelligent_cache_management;
-use super::swr::check_and_handle_swr_core;
-use super::tasks::{
+// Import helper functions from internal modules
+use super::internal::cache_mgmt::setup_intelligent_cache_management;
+use super::internal::swr::check_and_handle_swr_core;
+use super::internal::tasks::{
     check_and_handle_cache_expiration, setup_cache_expiration_task_core, setup_interval_task_core,
     setup_stale_check_task_core,
 };
@@ -192,14 +192,18 @@ impl<T: Clone + 'static, E: Clone + 'static> SuspenseSignalExt<T, E>
 /// Get the provider cache - requires global providers to be initialized
 fn get_provider_cache() -> ProviderCache {
     get_global_cache()
-        .expect("Global providers not initialized")
+        .unwrap_or_else(|_| {
+            panic!("Global providers not initialized. Call dioxus_provider::init() before using providers.")
+        })
         .clone()
 }
 
 /// Get the refresh registry - requires global providers to be initialized
 fn get_refresh_registry() -> RefreshRegistry {
     get_global_refresh_registry()
-        .expect("Global providers not initialized")
+        .unwrap_or_else(|_| {
+            panic!("Global providers not initialized. Call dioxus_provider::init() before using providers.")
+        })
         .clone()
 }
 
@@ -399,7 +403,8 @@ where
     let _execution_memo = use_memo(use_reactive!(|(provider, param)| {
         let cache_key = provider.id(&param);
 
-        debug!(
+        #[cfg(feature = "tracing")]
+        crate::debug_log!(
             "🔄 [USE_PROVIDER] Memo executing for key: {} with param: {:?}",
             cache_key, param
         );
@@ -424,7 +429,7 @@ where
         // Check cache for valid data
         if let Some(cached_result) = cache.get::<Result<P::Output, P::Error>>(&cache_key) {
             // Access tracking is automatically handled by cache.get() updating last_accessed time
-            debug!("📊 [CACHE-HIT] Serving cached data for: {}", cache_key);
+            crate::debug_log!("📊 [CACHE-HIT] Serving cached data for: {}", cache_key);
 
             match cached_result {
                 Ok(data) => {
@@ -452,7 +457,7 @@ where
         let task = spawn(async move {
             let result = provider.run(param).await;
             let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
-            debug!(
+            crate::debug_log!(
                 "📊 [CACHE-STORE] Attempted to store new data for: {} (updated: {})",
                 cache_key_clone, updated
             );

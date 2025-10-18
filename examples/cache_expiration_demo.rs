@@ -496,7 +496,7 @@ fn main() {
     tracing_subscriber::fmt::init();
 
     // Initialize global providers at application startup
-    init_global_providers();
+    dioxus_provider::init();
 
     launch(app);
 }

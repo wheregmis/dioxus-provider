@@ -24,7 +24,6 @@ use std::{
     },
     time::Duration,
 };
-use tracing::debug;
 
 use crate::platform::{DEFAULT_MAX_CACHE_SIZE, DEFAULT_UNUSED_THRESHOLD};
 
@@ -33,6 +32,52 @@ use crate::platform::{DEFAULT_MAX_CACHE_SIZE, DEFAULT_UNUSED_THRESHOLD};
 use std::time::Instant;
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
+
+/// Options for cache retrieval operations
+#[derive(Debug, Clone, Default)]
+pub struct CacheGetOptions {
+    /// Optional expiration duration - entries older than this will be removed
+    pub expiration: Option<Duration>,
+    /// Optional stale time - used to check if data is stale
+    pub stale_time: Option<Duration>,
+    /// Whether to return staleness information
+    pub check_staleness: bool,
+}
+
+impl CacheGetOptions {
+    /// Create new cache get options with default values
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the expiration duration
+    pub fn with_expiration(mut self, expiration: Duration) -> Self {
+        self.expiration = Some(expiration);
+        self
+    }
+
+    /// Set the stale time
+    pub fn with_stale_time(mut self, stale_time: Duration) -> Self {
+        self.stale_time = Some(stale_time);
+        self.check_staleness = true;
+        self
+    }
+
+    /// Enable staleness checking
+    pub fn check_staleness(mut self) -> Self {
+        self.check_staleness = true;
+        self
+    }
+}
+
+/// Result type for cache get operations with staleness information
+#[derive(Debug, Clone)]
+pub struct CacheGetResult<T> {
+    /// The cached data
+    pub data: T,
+    /// Whether the data is considered stale
+    pub is_stale: bool,
+}
 
 /// A type-erased cache entry for storing provider results with timestamp and access tracking
 #[derive(Clone)]
@@ -236,7 +281,80 @@ impl ProviderCache {
         self.cache.lock().ok()?.get(key)?.get::<T>()
     }
 
+    /// Retrieves a cached result with configurable options
+    ///
+    /// This unified method handles expiration, staleness checking, and other cache retrieval options.
+    ///
+    /// # Arguments
+    ///
+    /// * `&self` - A reference to the `ProviderCache`.
+    /// * `key` - The key to retrieve.
+    /// * `options` - Cache retrieval options (expiration, stale time, etc.)
+    ///
+    /// # Returns
+    ///
+    /// An `Option<CacheGetResult<T>>` containing the cached data and staleness info if available.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use dioxus_provider::cache::{ProviderCache, CacheGetOptions};
+    /// use std::time::Duration;
+    ///
+    /// let cache = ProviderCache::new();
+    /// let options = CacheGetOptions::new()
+    ///     .with_expiration(Duration::from_secs(300))
+    ///     .with_stale_time(Duration::from_secs(60));
+    ///
+    /// if let Some(result) = cache.get_with_options::<String>("my_key", options) {
+    ///     println!("Data: {}, Stale: {}", result.data, result.is_stale);
+    /// }
+    /// ```
+    pub fn get_with_options<T: Clone + Send + Sync + 'static>(
+        &self,
+        key: &str,
+        options: CacheGetOptions,
+    ) -> Option<CacheGetResult<T>> {
+        let cache_guard = self.cache.lock().ok()?;
+        let entry = cache_guard.get(key)?;
+
+        // Check expiration first
+        if let Some(exp_duration) = options.expiration {
+            if entry.is_expired(exp_duration) {
+                drop(cache_guard);
+                // Remove expired entry
+                if let Ok(mut cache) = self.cache.lock() {
+                    cache.remove(key);
+                    crate::debug_log!(
+                        "🗑️ [CACHE-EXPIRATION] Removing expired cache entry for key: {}",
+                        key
+                    );
+                }
+                return None;
+            }
+        }
+
+        // Get the data
+        let data = entry.get::<T>()?;
+
+        // Check staleness if requested
+        let is_stale = if options.check_staleness {
+            if let Some(stale_duration) = options.stale_time {
+                entry.is_stale(stale_duration)
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        Some(CacheGetResult { data, is_stale })
+    }
+
     /// Retrieves a cached result by key, checking for expiration with a specific expiration duration.
+    ///
+    /// # Deprecated
+    /// Use `get_with_options()` instead for more flexible cache retrieval.
     ///
     /// # Arguments
     ///
@@ -251,6 +369,10 @@ impl ProviderCache {
     /// # Side Effects
     ///
     /// If expired, the entry is removed from the cache.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use get_with_options() instead for more flexible cache retrieval"
+    )]
     pub fn get_with_expiration<T: Clone + Send + Sync + 'static>(
         &self,
         key: &str,
@@ -272,7 +394,7 @@ impl ProviderCache {
         if is_expired {
             if let Ok(mut cache) = self.cache.lock() {
                 cache.remove(key);
-                debug!(
+                crate::debug_log!(
                     "🗑️ [CACHE-EXPIRATION] Removing expired cache entry for key: {}",
                     key
                 );
@@ -288,6 +410,9 @@ impl ProviderCache {
 
     /// Retrieves cached data with staleness information for SWR behavior.
     ///
+    /// # Deprecated
+    /// Use `get_with_options()` instead for more flexible cache retrieval.
+    ///
     /// # Arguments
     ///
     /// * `&self` - A reference to the `ProviderCache`.
@@ -302,6 +427,10 @@ impl ProviderCache {
     /// # Side Effects
     ///
     /// None.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use get_with_options() instead for more flexible cache retrieval"
+    )]
     pub fn get_with_staleness<T: Clone + Send + Sync + 'static>(
         &self,
         key: &str,
@@ -353,14 +482,14 @@ impl ProviderCache {
                 && existing_value == value
             {
                 existing_entry.refresh_timestamp();
-                debug!(
+                crate::debug_log!(
                     "⏸️ [CACHE-STORE] Value unchanged for key: {}, refreshing timestamp",
                     key
                 );
                 return false;
             }
             cache.insert(key.clone(), CacheEntry::new(value));
-            debug!("📊 [CACHE-STORE] Stored data for key: {}", key);
+            crate::debug_log!("📊 [CACHE-STORE] Stored data for key: {}", key);
             return true;
         }
         false
@@ -400,7 +529,7 @@ impl ProviderCache {
     /// The entry is removed from the cache.
     pub fn invalidate(&self, key: &str) {
         self.remove(key);
-        debug!(
+        crate::debug_log!(
             "🗑️ [CACHE-INVALIDATE] Invalidated cache entry for key: {}",
             key
         );
@@ -417,9 +546,10 @@ impl ProviderCache {
     /// All entries are removed from the cache.
     pub fn clear(&self) {
         if let Ok(mut cache) = self.cache.lock() {
+            #[cfg(feature = "tracing")]
             let count = cache.len();
             cache.clear();
-            debug!("🗑️ [CACHE-CLEAR] Cleared {} cache entries", count);
+            crate::debug_log!("🗑️ [CACHE-CLEAR] Cleared {} cache entries", count);
         }
     }
 
@@ -457,16 +587,17 @@ impl ProviderCache {
     pub fn cleanup_unused_entries(&self, unused_threshold: Duration) -> usize {
         if let Ok(mut cache) = self.cache.lock() {
             let initial_size = cache.len();
-            cache.retain(|key, entry| {
+            cache.retain(|_key, entry| {
                 let should_keep = !entry.is_unused_for(unused_threshold);
+                #[cfg(feature = "tracing")]
                 if !should_keep {
-                    debug!("🧹 [CACHE-CLEANUP] Removing unused entry: {}", key);
+                    crate::debug_log!("🧹 [CACHE-CLEANUP] Removing unused entry: {}", _key);
                 }
                 should_keep
             });
             let removed = initial_size - cache.len();
             if removed > 0 {
-                debug!("🧹 [CACHE-CLEANUP] Removed {} unused entries", removed);
+                crate::debug_log!("🧹 [CACHE-CLEANUP] Removed {} unused entries", removed);
             }
             removed
         } else {
@@ -510,7 +641,7 @@ impl ProviderCache {
             cache.extend(to_keep);
 
             if evicted > 0 {
-                debug!(
+                crate::debug_log!(
                     "🗑️ [LRU-EVICT] Evicted {} entries due to cache size limit",
                     evicted
                 );

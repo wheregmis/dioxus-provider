@@ -1,7 +1,7 @@
 //! Cache management utilities
 
 use std::time::Duration;
-use tracing::debug;
+
 
 use crate::{
     cache::ProviderCache,
@@ -9,7 +9,7 @@ use crate::{
     types::ProviderParamBounds,
 };
 
-use super::Provider;
+use super::super::Provider;
 
 /// Sets up intelligent cache management for a provider
 ///
@@ -46,7 +46,7 @@ pub fn setup_intelligent_cache_management<P, Param>(
                 // Remove entries that haven't been accessed recently
                 let removed = cache_clone.cleanup_unused_entries(unused_threshold);
                 if removed > 0 {
-                    debug!(
+                    crate::debug_log!(
                         "🧹 [SMART-CLEANUP] Removed {} unused cache entries",
                         removed
                     );
@@ -56,7 +56,7 @@ pub fn setup_intelligent_cache_management<P, Param>(
                 const MAX_CACHE_SIZE: usize = 1000;
                 let evicted = cache_clone.evict_lru_entries(MAX_CACHE_SIZE);
                 if evicted > 0 {
-                    debug!(
+                    crate::debug_log!(
                         "🗑️ [LRU-EVICT] Evicted {} entries due to cache size limit",
                         evicted
                     );
@@ -64,7 +64,8 @@ pub fn setup_intelligent_cache_management<P, Param>(
             },
         );
 
-        debug!(
+        #[cfg(feature = "tracing")]
+        crate::debug_log!(
             "📊 [SMART-CACHE] Intelligent cache management enabled for: {} (cleanup every {:?})",
             cache_key, cleanup_interval
         );

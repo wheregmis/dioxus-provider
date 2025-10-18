@@ -324,9 +324,8 @@ fn App() -> Element {
 
 /// Initialize all dependencies
 fn init_dependencies() -> Result<(), String> {
-    // Initialize dependency injection system
-    init_dependency_injection();
-
+    // Note: Dependency injection is initialized via dioxus_provider::init() in main()
+    
     // Register API client if not already registered
     if !has_dependency::<ApiClient>() {
         let api_client = ApiClient::new(
@@ -353,7 +352,7 @@ fn main() {
     }
 
     // Initialize global providers
-    init_global_providers();
+    dioxus_provider::init();
 
     // Launch the app
     dioxus::launch(App);

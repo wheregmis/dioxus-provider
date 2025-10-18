@@ -2,7 +2,7 @@
 
 use dioxus::prelude::*;
 use std::time::Duration;
-use tracing::debug;
+
 
 use crate::{
     cache::ProviderCache,
@@ -10,7 +10,8 @@ use crate::{
     types::ProviderParamBounds,
 };
 
-use super::{Provider, swr::check_and_handle_swr_core};
+use super::super::Provider;
+use super::swr::check_and_handle_swr_core;
 
 /// Minimum interval for periodic tasks to prevent busy spinning
 const MIN_TASK_INTERVAL: Duration = Duration::from_millis(1);
@@ -122,7 +123,7 @@ pub fn setup_cache_expiration_task_core<P, Param>(
                 if let Ok(mut cache_lock) = cache_clone.cache.lock() {
                     if let Some(entry) = cache_lock.get(&cache_key_clone) {
                         if entry.is_expired(expiration) {
-                            debug!(
+                            crate::debug_log!(
                                 "🗑️ [AUTO-EXPIRATION] Cache expired for key: {} - triggering reactive refresh",
                                 cache_key_clone
                             );
@@ -168,7 +169,7 @@ pub fn setup_cache_expiration_task_core<P, Param>(
                 if let Ok(mut cache_lock) = cache_clone.cache.lock() {
                     if let Some(entry) = cache_lock.get(&cache_key_clone) {
                         if entry.is_expired(expiration) {
-                            debug!(
+                            crate::debug_log!(
                                 "🗑️ [AUTO-EXPIRATION] Cache expired for key: {} - triggering reactive refresh",
                                 cache_key_clone
                             );
@@ -260,7 +261,7 @@ pub fn check_and_handle_cache_expiration(
         let should_trigger_refresh = if let Ok(mut cache_lock) = cache.cache.lock() {
             if let Some(entry) = cache_lock.get(cache_key) {
                 if entry.is_expired(expiration) {
-                    debug!(
+                    crate::debug_log!(
                         "🗑️ [CACHE EXPIRATION] Removing expired cache entry for key: {}",
                         cache_key
                     );

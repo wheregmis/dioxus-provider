@@ -64,6 +64,6 @@ fn CounterApp() -> Element {
 
 fn main() {
     COUNTER.store(0, Ordering::SeqCst);
-    dioxus_provider::global::init_global_providers();
+    dioxus_provider::init();
     dioxus::launch(CounterApp);
 }

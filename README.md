@@ -145,15 +145,23 @@ let (mutation_state, mutate) = use_mutation(add_todo());
 
 ### 2. Optimistic Updates
 
-For better UX, use optimistic mutations that update the UI immediately and rollback on failure:
+For better UX, add an `optimistic` parameter to your mutation that updates the UI immediately and rolls back on failure:
 
 ```rust
-#[mutation(invalidates = [fetch_todos])]
-async fn toggle_todo(id: u32) -> Result<Todo, String> {
+#[mutation(
+    invalidates = [fetch_todos],
+    optimistic = |todos: &mut Vec<Todo>, id: &u32| {
+        if let Some(todo) = todos.iter_mut().find(|t| t.id == *id) {
+            todo.completed = !todo.completed;
+        }
+    }
+)]
+async fn toggle_todo(id: u32) -> Result<Vec<Todo>, String> {
     // ... toggle logic ...
 }
 
-let (mutation_state, toggle) = use_optimistic_mutation(toggle_todo());
+// use_mutation automatically detects and enables optimistic updates
+let (mutation_state, toggle) = use_mutation(toggle_todo());
 ```
 
 ### 3. Multiple Cache Invalidation

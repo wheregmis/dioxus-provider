@@ -210,13 +210,67 @@ pub fn provider(args: TokenStream, input: TokenStream) -> TokenStream {
 ///
 /// # Supported Arguments
 /// - `invalidates = [provider1, provider2, ...]` - Providers to invalidate after mutation
+/// - `optimistic = |data, ...args| { ... }` - Optimistic update closure (requires MutationContext)
 ///
-/// # Example
+/// ## Optimistic Updates
+/// The optimistic closure receives:
+/// - First param: `&mut Data` - mutable reference to current cached data
+/// - Remaining params: references to mutation inputs
+///
+/// Examples:
+/// - No args: `optimistic = |data: &mut Vec<Item>| { data.clear() }`
+/// - One arg: `optimistic = |data: &mut Vec<Item>, id: &u64| { data.retain(|i| i.id != *id) }`
+/// - Multi-arg: `optimistic = |data: &mut Item, name: &String, status: &bool| { data.name = name.clone(); data.active = *status; }`
+///
+/// ## Return Values
+/// Mutation return values serve multiple purposes:
+/// - Update `MutationState` for UI feedback (Success/Error)
+/// - With optimistic updates: replace cache with server response (avoids refetch)
+/// - Without optimistic: cache is invalidated and providers refetch automatically
+///
+/// # Examples
 /// ```rust
+/// // Simple mutation with cache invalidation
 /// #[mutation(invalidates = [fetch_user, fetch_user_list])]
 /// async fn update_user(user: User) -> Result<User, String> {
 ///     // Update user implementation
 ///     // Will automatically invalidate fetch_user and fetch_user_list caches
+/// }
+///
+/// // Optimistic mutation with single argument
+/// #[mutation(
+///     invalidates = [load_items],
+///     optimistic = |items: &mut Vec<Item>, id: &u64| {
+///         items.retain(|i| i.id != *id)
+///     }
+/// )]
+/// async fn delete_item(
+///     id: u64,
+///     ctx: MutationContext<Vec<Item>, Error>,
+/// ) -> Result<Vec<Item>, Error> {
+///     ctx.map_current(|items| items.retain(|i| i.id != id))
+///         .ok_or(Error::NoData)
+/// }
+///
+/// // Optimistic mutation with multiple arguments
+/// #[mutation(
+///     invalidates = [load_items],
+///     optimistic = |items: &mut Vec<Item>, id: &u64, name: &String| {
+///         if let Some(item) = items.iter_mut().find(|i| i.id == *id) {
+///             item.name = name.clone();
+///         }
+///     }
+/// )]
+/// async fn update_item(
+///     id: u64,
+///     name: String,
+///     ctx: MutationContext<Vec<Item>, Error>,
+/// ) -> Result<Vec<Item>, Error> {
+///     ctx.map_current(|items| {
+///         if let Some(item) = items.iter_mut().find(|i| i.id == id) {
+///             item.name = name;
+///         }
+///     }).ok_or(Error::NoData)
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -375,8 +429,14 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
     let common_struct = generate_common_struct_and_const(&info);
 
     let raw_params = extract_all_params(&input_fn)?;
-    let (input_params, context_param) = split_params(raw_params.clone())?;
+    let has_optimistic = mutation_args.optimistic.is_some();
+    let (input_params, context_param, data_param) =
+        split_mutation_params(raw_params.clone(), output_type, has_optimistic)?;
 
+    // Detect auto-apply mode: optimistic is present and there's a data parameter
+    let is_auto_apply = has_optimistic && data_param.is_some();
+
+    // Build call parameters based on the original function signature
     let call_params: Vec<_> = raw_params
         .iter()
         .map(|p| {
@@ -397,29 +457,31 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
     } };
 
     let input_count = input_params.len();
+    let input_type = build_input_type(&input_params);
 
-    let input_type = match input_count {
-        0 => quote! { () },
-        1 => {
-            let ty = &input_params[0].ty;
-            quote! { #ty }
-        }
-        _ => {
-            let tys: Vec<_> = input_params.iter().map(|p| &p.ty).collect();
-            quote! { (#(#tys,),*) }
-        }
-    };
+    let data_param_name = data_param.as_ref().map(|p| &p.name);
 
-    let call_args_builder = |ctx_ident: Option<&syn::Ident>| -> Vec<TokenStream2> {
+    let call_args_builder = |ctx_ident: Option<&syn::Ident>,
+                             auto_apply_data_expr: Option<TokenStream2>|
+     -> Vec<TokenStream2> {
         raw_params
             .iter()
             .map(|param| {
+                // If this is the context parameter, use the ctx_ident
                 if let Some(ctx) = ctx_ident {
                     if param.name == *ctx {
-                        let ident = ctx;
-                        return quote! { #ident };
+                        return quote! { #ctx };
                     }
                 }
+                // If this is the data parameter and we have auto-applied data, use that
+                if let Some(data_name) = data_param_name {
+                    if param.name == *data_name {
+                        if let Some(ref data_expr) = auto_apply_data_expr {
+                            return data_expr.clone();
+                        }
+                    }
+                }
+                // Otherwise, use the parameter name as-is
                 let name = &param.name;
                 quote! { #name }
             })
@@ -430,30 +492,24 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
     let context_data_ty = context_param.as_ref().map(|ctx| ctx.data_ty.clone());
     let context_error_ty = context_param.as_ref().map(|ctx| ctx.error_ty.clone());
 
-    let call_args = call_args_builder(context_ident.as_ref());
-
     let optimistic_impl = if let Some(optimistic_expr) = &mutation_args.optimistic {
-        if input_count != 1 {
-            return Err(syn::Error::new_spanned(
-                optimistic_expr,
-                "Optimistic mutations currently require exactly one input parameter",
-            ));
-        }
-
-        if context_param.is_none() {
-            return Err(syn::Error::new_spanned(
-                optimistic_expr,
-                "Optimistic mutations require a MutationContext parameter to access cached data",
-            ));
-        }
-
-        let input_ty = &input_params[0].ty;
-        let optimistic_expr_clone = optimistic_expr.clone();
+        // Generate the call to optimistic closure based on param count
+        let optimistic_call = match input_params.len() {
+            0 => quote! { (#optimistic_expr)(&mut updated) },
+            1 => quote! { (#optimistic_expr)(&mut updated, input) },
+            _ => {
+                let names: Vec<_> = input_params.iter().map(|p| &p.name).collect();
+                quote! {
+                    let (#(ref #names,)*) = *input;
+                    (#optimistic_expr)(&mut updated, #(#names,)*)
+                }
+            }
+        };
 
         quote! {
             fn optimistic_updates_with_current(
                 &self,
-                input: &#input_ty,
+                input: &#input_type,
                 current_data: Option<&Result<Self::Output, Self::Error>>,
             ) -> Vec<(String, Result<Self::Output, Self::Error>)> {
                 let keys = self.invalidates();
@@ -463,7 +519,7 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
 
                 if let Some(Ok(current)) = current_data {
                     let mut updated = current.clone();
-                    (#optimistic_expr_clone)(&mut updated, input);
+                    #optimistic_call;
 
                     let mut results = Vec::with_capacity(keys.len());
                     for key in keys {
@@ -503,13 +559,24 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
             }
         };
 
-        if let (Some(ctx_ident), Some(data_ty), Some(err_ty)) = (
-            context_ident.as_ref(),
-            context_data_ty.as_ref(),
-            context_error_ty.as_ref(),
-        ) {
-            prelude.push(quote! { let #ctx_ident = ::dioxus_provider::mutation::MutationContext::<'static, #data_ty, #err_ty>::new(None); });
+        // Create MutationContext if needed in manual mode
+        if !is_auto_apply {
+            if let (Some(ctx_ident), Some(data_ty), Some(err_ty)) = (
+                context_ident.as_ref(),
+                context_data_ty.as_ref(),
+                context_error_ty.as_ref(),
+            ) {
+                prelude.push(quote! { let #ctx_ident = ::dioxus_provider::mutation::MutationContext::<'static, #data_ty, #err_ty>::new(None); });
+            }
         }
+
+        let call_args = if is_auto_apply {
+            // Auto-apply mode: provide default data (rarely called - should use mutate_with_current)
+            call_args_builder(None, Some(quote! { Default::default() }))
+        } else {
+            // Manual mode: use context if present
+            call_args_builder(context_ident.as_ref(), None)
+        };
 
         let call_expr = quote! { Self::call(#(#call_args),*) };
         let body = quote! { async move { #(#prelude)* #call_expr.await } };
@@ -552,13 +619,40 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
             }
         };
 
-        if let Some(ctx_ident) = context_ident.as_ref() {
-            prelude.push(quote! { let #ctx_ident = ::dioxus_provider::mutation::MutationContext::new(current_data); });
-        }
+        let call_args = if is_auto_apply {
+            // Auto-apply mode: use current_data directly (already has optimistic update applied by runtime)
+            // DO NOT re-apply the optimistic closure here - that would cause double-application!
+            prelude.push(quote! {
+                let __auto_apply_data = if let Some(Ok(current)) = current_data {
+                    current.clone()
+                } else {
+                    // If no current data, use default
+                    Default::default()
+                };
+            });
+
+            call_args_builder(None, Some(quote! { __auto_apply_data }))
+        } else {
+            // Manual mode: create MutationContext from current_data
+            if let Some(ctx_ident) = context_ident.as_ref() {
+                prelude.push(quote! { let #ctx_ident = ::dioxus_provider::mutation::MutationContext::new(current_data); });
+            }
+            call_args_builder(context_ident.as_ref(), None)
+        };
 
         let call_expr = quote! { Self::call(#(#call_args),*) };
         let body = quote! { async move { #(#prelude)* #call_expr.await } };
         (signature, body)
+    };
+
+    let has_optimistic_impl = if has_optimistic {
+        quote! {
+            fn has_optimistic(&self) -> bool {
+                true
+            }
+        }
+    } else {
+        quote! {}
     };
 
     let mutation_impl = quote! {
@@ -577,6 +671,8 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
             #optimistic_impl
 
             #invalidation_impl
+
+            #has_optimistic_impl
         }
     };
 
@@ -694,6 +790,7 @@ fn parse_context_type(ty: &Type) -> Option<(Type, Type)> {
     None
 }
 
+#[allow(dead_code)]
 fn split_params(params: Vec<ParamInfo>) -> Result<(Vec<ParamInfo>, Option<ContextInfo>)> {
     let mut input_params = Vec::new();
     let mut context_param = None;
@@ -717,6 +814,53 @@ fn split_params(params: Vec<ParamInfo>) -> Result<(Vec<ParamInfo>, Option<Contex
     }
 
     Ok((input_params, context_param))
+}
+
+/// Split mutation parameters into input params, context param, and auto-apply data param
+fn split_mutation_params(
+    params: Vec<ParamInfo>,
+    output_type: &Type,
+    has_optimistic: bool,
+) -> Result<(Vec<ParamInfo>, Option<ContextInfo>, Option<ParamInfo>)> {
+    let mut input_params = Vec::new();
+    let mut context_param = None;
+    let mut data_param = None;
+
+    for param in params {
+        if let Some((data_ty, error_ty)) = parse_context_type(&param.ty) {
+            if context_param.is_some() {
+                return Err(syn::Error::new_spanned(
+                    param.ty,
+                    "Only one MutationContext parameter is allowed",
+                ));
+            }
+            context_param = Some(ContextInfo {
+                name: param.name,
+                data_ty,
+                error_ty,
+            });
+        } else {
+            input_params.push(param);
+        }
+    }
+
+    // In auto-apply mode (has optimistic but no context), the last param might be the data param
+    if has_optimistic && context_param.is_none() && !input_params.is_empty() {
+        // Check if the last parameter's type matches the output type
+        if let Some(last_param) = input_params.last() {
+            if types_equal(&last_param.ty, output_type) {
+                data_param = input_params.pop();
+            }
+        }
+    }
+
+    Ok((input_params, context_param, data_param))
+}
+
+/// Compare two types for equality (simplified version)
+fn types_equal(ty1: &Type, ty2: &Type) -> bool {
+    // Simple string comparison for now
+    quote!(#ty1).to_string() == quote!(#ty2).to_string()
 }
 
 /// Extract provider information from the input function
@@ -796,6 +940,21 @@ fn extract_all_params(input_fn: &ItemFn) -> Result<Vec<ParamInfo>> {
     }
 
     Ok(params)
+}
+
+/// Build the input type: () for 0 params, T for 1 param, (T1, T2, ...) for N params
+fn build_input_type(params: &[ParamInfo]) -> TokenStream2 {
+    match params.len() {
+        0 => quote! { () },
+        1 => {
+            let ty = &params[0].ty;
+            quote! { #ty }
+        }
+        _ => {
+            let types: Vec<_> = params.iter().map(|p| &p.ty).collect();
+            quote! { (#(#types,)*) }
+        }
+    }
 }
 
 /// Extract result types from the function return type
