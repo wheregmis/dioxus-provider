@@ -549,6 +549,7 @@ impl ProviderCache {
             #[cfg(feature = "tracing")]
             let count = cache.len();
             cache.clear();
+            #[cfg(feature = "tracing")]
             crate::debug_log!("🗑️ [CACHE-CLEAR] Cleared {} cache entries", count);
         }
     }
