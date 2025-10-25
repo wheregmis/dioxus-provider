@@ -375,6 +375,7 @@ where
             let mut optimistic_updates = Vec::new();
 
             if is_optimistic {
+                // First, try to get optimistic updates from providers that have cached data
                 for cache_key in &cache_keys_to_check {
                     let current_data = cache.get::<Result<M::Output, M::Error>>(cache_key);
                     let updates =
@@ -382,8 +383,22 @@ where
                     optimistic_updates.extend(updates);
                 }
 
+                // If we don't have any optimistic updates yet, try the fallback method
                 if optimistic_updates.is_empty() {
                     optimistic_updates = mutation.optimistic_updates(&input);
+                }
+
+                // If we still don't have optimistic updates, but we have cache keys to invalidate,
+                // we need to handle the case where some providers don't have cached data
+                if optimistic_updates.is_empty() && !cache_keys_to_check.is_empty() {
+                    // For providers without cached data, we'll use SWR behavior:
+                    // - Don't show loading state immediately
+                    // - Let them fetch in the background while showing stale data (if any)
+                    // - This prevents jitters for providers that don't have optimistic updates
+                    crate::debug_log!(
+                        "⚡ [OPTIMISTIC] No optimistic updates available, using SWR for {} cache keys",
+                        cache_keys_to_check.len()
+                    );
                 }
 
                 if !optimistic_updates.is_empty() {

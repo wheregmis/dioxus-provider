@@ -446,7 +446,35 @@ where
             return;
         }
 
-        // Cache miss - set loading and spawn async task
+        // Cache miss - check if this is due to invalidation and we should use SWR behavior
+        let is_invalidation_refresh = refresh_registry.get_refresh_count(&cache_key) > 0;
+        
+        if is_invalidation_refresh {
+            // This is an invalidation refresh - use SWR behavior to prevent jitters
+            // Don't show loading state immediately, let SWR handle background revalidation
+            crate::debug_log!("🔄 [INVALIDATION] Cache miss due to invalidation for: {}, using SWR behavior", cache_key);
+            
+            // Set up background revalidation without showing loading state
+            let cache_clone = cache.clone();
+            let cache_key_clone = cache_key.clone();
+            let provider = provider.clone();
+            let param = param.clone();
+            let refresh_registry_clone = refresh_registry.clone();
+            
+            spawn(async move {
+                let result = provider.run(param).await;
+                let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
+                if updated {
+                    refresh_registry_clone.trigger_refresh(&cache_key_clone);
+                    crate::debug_log!("✅ [INVALIDATION] Background revalidation completed for: {}", cache_key_clone);
+                }
+            });
+            
+            // Don't set loading state - let the component handle the absence of data gracefully
+            return;
+        }
+
+        // Regular cache miss - set loading and spawn async task
         let cache_clone = cache.clone();
         let cache_key_clone = cache_key.clone();
         let provider = provider.clone();

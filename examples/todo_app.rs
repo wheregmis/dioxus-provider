@@ -94,6 +94,37 @@ pub async fn load_todos() -> Result<Vec<Todo>, TodoError> {
     load_todos_from_file_async().await
 }
 
+/// Statistics about todos
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TodoStats {
+    pub total: usize,
+    pub completed: usize,
+    pub active: usize,
+    pub completion_percentage: f64,
+}
+
+/// Provider for loading todo statistics
+#[provider(stale_time = "5s", cache_expiration = "20s")]
+pub async fn load_todo_stats() -> Result<TodoStats, TodoError> {
+    let todos = load_todos_from_file_async().await?;
+
+    let total = todos.len();
+    let completed = todos.iter().filter(|t| t.completed).count();
+    let active = total - completed;
+    let completion_percentage = if total > 0 {
+        (completed as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    Ok(TodoStats {
+        total,
+        completed,
+        active,
+        completion_percentage,
+    })
+}
+
 /// Helper to write todos to file asynchronously
 async fn save_todos_to_file_async(todos: &[Todo]) -> Result<(), TodoError> {
     let data = serde_json::to_string_pretty(todos).map_err(|e| TodoError::Json(Arc::new(e)))?;
@@ -105,7 +136,7 @@ async fn save_todos_to_file_async(todos: &[Todo]) -> Result<(), TodoError> {
 
 /// Mutation: Add a new todo
 #[mutation(
-    invalidates = [load_todos],
+    invalidates = [load_todos, load_todo_stats],
     optimistic = |todos: &mut Vec<Todo>, title: &String| {
         let id = next_todo_id(todos);
         todos.push(Todo {
@@ -123,7 +154,7 @@ pub async fn add_todo(_title: String, todos: Vec<Todo>) -> Result<Vec<Todo>, Tod
 
 /// Mutation: Toggle a todo's completed status
 #[mutation(
-    invalidates = [load_todos],
+    invalidates = [load_todos, load_todo_stats],
     optimistic = |todos: &mut Vec<Todo>, id: &u64| {
         if let Some(todo) = todos.iter_mut().find(|t| t.id == *id) {
             todo.completed = !todo.completed;
@@ -138,7 +169,7 @@ pub async fn toggle_todo(_id: u64, todos: Vec<Todo>) -> Result<Vec<Todo>, TodoEr
 
 /// Mutation: Update a todo's title
 #[mutation(
-    invalidates = [load_todos],
+    invalidates = [load_todos, load_todo_stats],
     optimistic = |todos: &mut Vec<Todo>, update: &TodoUpdate| {
         if let Some(todo) = todos.iter_mut().find(|t| t.id == update.id) {
             todo.title = update.title.clone();
@@ -153,7 +184,7 @@ pub async fn update_todo(_payload: TodoUpdate, todos: Vec<Todo>) -> Result<Vec<T
 
 /// Mutation: Delete a todo
 #[mutation(
-    invalidates = [load_todos],
+    invalidates = [load_todos, load_todo_stats],
     optimistic = |todos: &mut Vec<Todo>, id: &u64| {
         todos.retain(|t| t.id != *id);
     }
@@ -401,6 +432,47 @@ pub fn FilterBar(filter: Signal<Filter>) -> Element {
     }
 }
 
+/// Component: Display todo statistics
+#[component]
+pub fn TodoStatsDisplay() -> Element {
+    let stats = use_provider(load_todo_stats(), ());
+
+    rsx! {
+        div { class: "bg-blue-50 border border-blue-200 rounded-lg p-4",
+            match &*stats.read() {
+                ProviderState::Loading { .. } => rsx! {
+                    div { class: "text-center text-blue-600", "Loading stats..." }
+                },
+                ProviderState::Error(err) => rsx! {
+                    div { class: "text-center text-red-500", "Failed to load stats: {err}" }
+                },
+                ProviderState::Success(stats) => rsx! {
+                    div { class: "grid grid-cols-2 md:grid-cols-4 gap-4 text-center",
+                        div { class: "space-y-1",
+                            div { class: "text-2xl font-bold text-blue-600", "{stats.total}" }
+                            div { class: "text-sm text-gray-600", "Total" }
+                        }
+                        div { class: "space-y-1",
+                            div { class: "text-2xl font-bold text-green-600", "{stats.completed}" }
+                            div { class: "text-sm text-gray-600", "Completed" }
+                        }
+                        div { class: "space-y-1",
+                            div { class: "text-2xl font-bold text-orange-600", "{stats.active}" }
+                            div { class: "text-sm text-gray-600", "Active" }
+                        }
+                        div { class: "space-y-1",
+                            div { class: "text-2xl font-bold text-purple-600",
+                                "{(stats.completion_percentage as u32)}%"
+                            }
+                            div { class: "text-sm text-gray-600", "Complete" }
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
 /// Root app component
 #[component]
 pub fn TodoApp() -> Element {
@@ -414,6 +486,7 @@ pub fn TodoApp() -> Element {
                     p { class: "text-gray-500", "Demonstrates providers + optimistic mutations" }
                 }
 
+                TodoStatsDisplay {}
                 TodoInput {}
                 FilterBar { filter }
                 TodoList { filter: *filter.read() }
