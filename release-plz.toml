@@ -22,7 +22,7 @@ commit_preprocessors = [
     # Replace multiple spaces with a single space.
     { pattern = "  +", replace = " " },
     # Replace the issue/PR number with the link. It will work for PRs as well as GitHub has a redirect.
-    { pattern = "\\(#([0-9]+)\\)", replace = "([#${1}](https://github.com/wheregmis/dioxus-provider/pull//${1}))" },
+    { pattern = "\\(#([0-9]+)\\)", replace = "([#${1}](https://github.com/wheregmis/dioxus-provider/pull/${1}))" },
     # Hyperlink bare commit hashes like "abcd1234" in commit logs, with short commit hash as description.
     { pattern = "([ \\n])(([a-f0-9]{7})[a-f0-9]*)", replace = "${1}commit [${3}](https://github.com/wheregmis/dioxus-provider/commit/${2})" },
 ]
