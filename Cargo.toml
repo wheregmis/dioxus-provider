@@ -1,7 +1,7 @@
 [package]
 name = "dioxus-provider"
 description = "Data fetching and caching library for Dioxus applications with intelligent caching strategies and global providers."
-version = "0.0.6"
+version = "0.0.7"
 edition = "2024"
 license = "MIT"
 authors = ["Sabin Regmi <get2sabin@gmail.com>"]
@@ -28,7 +28,7 @@ dioxus = { version = "0.7.0-rc.3", default-features = false, features = [
     "signals",
 ] }
 # dioxus-provider-macros = { version = "0.1.1" }
-dioxus-provider-macros = { version = "0.1.2", path = "./dioxus-provider-macros" }
+dioxus-provider-macros = { version = "0.1.3", path = "./dioxus-provider-macros" }
 futures = "0.3"
 tracing = { version = "0.1.41", optional = true }
 thiserror = "2.0.17"

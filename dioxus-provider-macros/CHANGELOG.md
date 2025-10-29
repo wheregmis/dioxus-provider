@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-macros-v0.1.2...dioxus-provider-macros-v0.1.3) - 2025-10-29
+
+### <!-- 3 -->Other
+
+- Refactor types_equal to use structural equality
+- unify optimistic_mutation with mutation
+- automatic mutation
+- Multiargument Support for mutation
+- much cleaner api
+- some clippy fixes
+
 ## [0.1.2](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-macros-v0.1.1...dioxus-provider-macros-v0.1.2) - 2025-06-30
 
 ### <!-- 3 -->Other
