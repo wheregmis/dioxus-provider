@@ -268,7 +268,7 @@ fn app() -> Element {
 
 fn main() {
     // Initialize global providers for application-wide cache management
-    dioxus_provider::global::init_global_providers();
+    dioxus_provider::init();
 
     println!("🚀 Starting SWR Demo");
     println!("🔄 Demonstrating Stale-While-Revalidate pattern");

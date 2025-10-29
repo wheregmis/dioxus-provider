@@ -21,7 +21,7 @@
 use dioxus::{core::ReactiveContext, prelude::*};
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, atomic::AtomicBool},
     time::Duration,
 };
 
@@ -48,7 +48,8 @@ pub enum TaskType {
 }
 
 /// Registry for periodic tasks (intervals and stale checks)
-type PeriodicTaskRegistry = Arc<Mutex<HashMap<String, (TaskType, Duration, ())>>>;
+/// Stores task type, duration, and cancellation flag
+type PeriodicTaskRegistry = Arc<Mutex<HashMap<String, (TaskType, Duration, Arc<AtomicBool>)>>>;
 
 /// Global registry for refresh signals that can trigger provider re-execution
 ///
@@ -151,7 +152,7 @@ impl RefreshRegistry {
     /// ## Cross-Platform Implementation
     ///
     /// Uses `dioxus::spawn` to create tasks that work on both web and desktop platforms.
-    /// Tasks are automatically cancelled when the component unmounts.
+    /// Tasks can be cancelled explicitly using stop_* methods, which set a cancellation flag.
     pub fn start_periodic_task<F>(
         &self,
         key: &str,
@@ -176,8 +177,10 @@ impl RefreshRegistry {
             // Cancel existing task if it exists and the new interval is shorter (for interval tasks)
             let should_create_new_task = match tasks.get(&task_key) {
                 None => true,
-                Some((_, current_interval, _)) => {
+                Some((_, current_interval, cancel_flag)) => {
                     if task_type == TaskType::IntervalRefresh && interval < *current_interval {
+                        // Signal existing task to stop
+                        cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
                         tasks.remove(&task_key);
                         true
                     } else {
@@ -200,17 +203,30 @@ impl RefreshRegistry {
                     _ => interval,
                 };
 
-                let _task_key_clone = task_key.clone();
+                // Create cancellation flag for this task
+                let cancel_flag = Arc::new(AtomicBool::new(false));
+                let cancel_flag_clone = cancel_flag.clone();
                 let task_fn = Arc::new(task_fn);
 
                 spawn(async move {
                     loop {
+                        // Check if task should be cancelled before sleeping
+                        if cancel_flag_clone.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+
                         time::sleep(actual_interval).await;
+
+                        // Check if task should be cancelled before running
+                        if cancel_flag_clone.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+
                         task_fn();
                     }
                 });
 
-                tasks.insert(task_key, (task_type, interval, ()));
+                tasks.insert(task_key, (task_type, interval, cancel_flag));
             }
         }
     }
@@ -237,12 +253,15 @@ impl RefreshRegistry {
 
     /// Stop a periodic task
     ///
-    /// Removes the task from the registry. The actual task will complete its current
-    /// iteration and then stop.
+    /// Signals the task to stop by setting its cancellation flag and removes it from the registry.
+    /// The task will stop after its current iteration completes.
     pub fn stop_periodic_task(&self, key: &str, task_type: TaskType) {
         if let Ok(mut tasks) = self.periodic_tasks.lock() {
             let task_key = format!("{key}:{task_type:?}");
-            tasks.remove(&task_key);
+            if let Some((_, _, cancel_flag)) = tasks.remove(&task_key) {
+                // Signal the task to stop
+                cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         }
     }
 

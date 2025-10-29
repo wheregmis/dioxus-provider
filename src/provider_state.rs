@@ -1,6 +1,35 @@
 //! ProviderState: Async state enum for dioxus-provider
+//!
+//! This module provides the `ProviderState` enum and the `AsyncState` trait for working
+//! with asynchronous operations in dioxus-provider.
 
 use dioxus::core::Task;
+
+/// Common trait for async state types that represent loading, success, and error states
+///
+/// This trait provides a unified interface for working with different async state types
+/// in dioxus-provider, such as `ProviderState` and `MutationState`.
+pub trait AsyncState {
+    /// The type of successful data
+    type Data;
+    /// The type of error
+    type Error;
+
+    /// Returns true if the state is currently loading
+    fn is_loading(&self) -> bool;
+
+    /// Returns true if the state contains successful data
+    fn is_success(&self) -> bool;
+
+    /// Returns true if the state contains an error
+    fn is_error(&self) -> bool;
+
+    /// Returns the data if successful, None otherwise
+    fn data(&self) -> Option<&Self::Data>;
+
+    /// Returns the error if failed, None otherwise
+    fn error(&self) -> Option<&Self::Error>;
+}
 
 /// Represents the state of an async operation
 #[derive(Clone, PartialEq, Debug)]
@@ -13,36 +42,61 @@ pub enum ProviderState<T, E> {
     Error(E),
 }
 
-impl<T, E> ProviderState<T, E> {
-    /// Returns true if the state is currently loading
-    pub fn is_loading(&self) -> bool {
+impl<T, E> AsyncState for ProviderState<T, E> {
+    type Data = T;
+    type Error = E;
+
+    fn is_loading(&self) -> bool {
         matches!(self, ProviderState::Loading { task: _ })
     }
 
-    /// Returns true if the state contains successful data
-    pub fn is_success(&self) -> bool {
+    fn is_success(&self) -> bool {
         matches!(self, ProviderState::Success(_))
     }
 
-    /// Returns true if the state contains an error
-    pub fn is_error(&self) -> bool {
+    fn is_error(&self) -> bool {
         matches!(self, ProviderState::Error(_))
     }
 
-    /// Returns the data if successful, None otherwise
-    pub fn data(&self) -> Option<&T> {
+    fn data(&self) -> Option<&T> {
         match self {
             ProviderState::Success(data) => Some(data),
             _ => None,
         }
     }
 
-    /// Returns the error if failed, None otherwise
-    pub fn error(&self) -> Option<&E> {
+    fn error(&self) -> Option<&E> {
         match self {
             ProviderState::Error(error) => Some(error),
             _ => None,
         }
+    }
+}
+
+impl<T, E> ProviderState<T, E> {
+    /// Returns true if the state is currently loading
+    pub fn is_loading(&self) -> bool {
+        <Self as AsyncState>::is_loading(self)
+    }
+
+    /// Returns true if the state contains successful data
+    pub fn is_success(&self) -> bool {
+        <Self as AsyncState>::is_success(self)
+    }
+
+    /// Returns true if the state contains an error
+    pub fn is_error(&self) -> bool {
+        <Self as AsyncState>::is_error(self)
+    }
+
+    /// Returns the data if successful, None otherwise
+    pub fn data(&self) -> Option<&T> {
+        <Self as AsyncState>::data(self)
+    }
+
+    /// Returns the error if failed, None otherwise
+    pub fn error(&self) -> Option<&E> {
+        <Self as AsyncState>::error(self)
     }
 
     /// Maps a ProviderState<T, E> to ProviderState<U, E> by applying a function to the contained data if successful.

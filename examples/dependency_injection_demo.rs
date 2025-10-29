@@ -324,8 +324,7 @@ fn App() -> Element {
 
 /// Initialize all dependencies
 fn init_dependencies() -> Result<(), String> {
-    // Initialize dependency injection system
-    init_dependency_injection();
+    // Note: Dependency injection is initialized via dioxus_provider::init() in main()
 
     // Register API client if not already registered
     if !has_dependency::<ApiClient>() {
@@ -353,7 +352,10 @@ fn main() {
     }
 
     // Initialize global providers
-    init_global_providers();
+    if let Err(err) = dioxus_provider::init() {
+        eprintln!("❌ Failed to initialize dioxus_provider: {err}");
+        std::process::exit(1);
+    }
 
     // Launch the app
     dioxus::launch(App);

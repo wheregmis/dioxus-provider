@@ -6,12 +6,17 @@ pub mod errors;
 pub mod global;
 pub mod hooks;
 pub mod injection;
+mod log_utils;
 pub mod mutation;
-mod param_utils;
+pub mod param_utils;
 pub mod platform;
 mod provider_state;
 pub mod refresh;
 pub mod types;
+
+// Re-export commonly used items at crate root for convenience
+pub use global::ProviderConfig;
+pub use global::init;
 
 pub mod prelude {
     //! The prelude exports all the most common types and functions for using dioxus-provider.
@@ -29,10 +34,10 @@ pub mod prelude {
     pub use crate::hooks::use_provider_cache;
 
     // The async state enum, needed for matching
-    pub use crate::provider_state::ProviderState;
+    pub use crate::provider_state::{AsyncState, ProviderState};
 
     // Global initialization
-    pub use crate::global::init_global_providers;
+    pub use crate::global::{ProviderConfig, init, init_global_providers};
 
     // Dependency Injection
     pub use crate::injection::{
@@ -41,8 +46,8 @@ pub mod prelude {
 
     // Mutation system - Manual Implementation Pattern
     pub use crate::mutation::{
-        Mutation, MutationState, provider_cache_key, provider_cache_key_simple, use_mutation,
-        use_optimistic_mutation,
+        Mutation, MutationContext, MutationState, provider_cache_key, provider_cache_key_simple,
+        use_mutation, use_optimistic_mutation,
     };
 
     // Error types
@@ -50,4 +55,7 @@ pub mod prelude {
         ApiError, ApiResult, DatabaseError, DatabaseResult, ProviderError, ProviderResult,
         UserError, UserResult,
     };
+
+    // Parameter utilities for custom types
+    pub use crate::param_utils::IntoProviderParam;
 }

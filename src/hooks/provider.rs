@@ -31,16 +31,24 @@ use dioxus::{
     prelude::*,
 };
 use std::{fmt::Debug, future::Future, time::Duration};
-use tracing::debug;
+
 
 use crate::{
     cache::ProviderCache,
     global::{get_global_cache, get_global_refresh_registry},
-    refresh::{RefreshRegistry, TaskType},
+    refresh::RefreshRegistry,
 };
 
 use crate::param_utils::IntoProviderParam;
 use crate::types::{ProviderErrorBounds, ProviderOutputBounds, ProviderParamBounds};
+
+// Import helper functions from internal modules
+use super::internal::cache_mgmt::setup_intelligent_cache_management;
+use super::internal::swr::check_and_handle_swr_core;
+use super::internal::tasks::{
+    check_and_handle_cache_expiration, setup_cache_expiration_task_core, setup_interval_task_core,
+    setup_stale_check_task_core,
+};
 
 pub use crate::provider_state::ProviderState;
 
@@ -184,14 +192,18 @@ impl<T: Clone + 'static, E: Clone + 'static> SuspenseSignalExt<T, E>
 /// Get the provider cache - requires global providers to be initialized
 fn get_provider_cache() -> ProviderCache {
     get_global_cache()
-        .expect("Global providers not initialized")
+        .unwrap_or_else(|_| {
+            panic!("Global providers not initialized. Call dioxus_provider::init() before using providers.")
+        })
         .clone()
 }
 
 /// Get the refresh registry - requires global providers to be initialized
 fn get_refresh_registry() -> RefreshRegistry {
     get_global_refresh_registry()
-        .expect("Global providers not initialized")
+        .unwrap_or_else(|_| {
+            panic!("Global providers not initialized. Call dioxus_provider::init() before using providers.")
+        })
         .clone()
 }
 
@@ -391,7 +403,8 @@ where
     let _execution_memo = use_memo(use_reactive!(|(provider, param)| {
         let cache_key = provider.id(&param);
 
-        debug!(
+        #[cfg(feature = "tracing")]
+        crate::debug_log!(
             "🔄 [USE_PROVIDER] Memo executing for key: {} with param: {:?}",
             cache_key, param
         );
@@ -416,7 +429,7 @@ where
         // Check cache for valid data
         if let Some(cached_result) = cache.get::<Result<P::Output, P::Error>>(&cache_key) {
             // Access tracking is automatically handled by cache.get() updating last_accessed time
-            debug!("📊 [CACHE-HIT] Serving cached data for: {}", cache_key);
+            crate::debug_log!("📊 [CACHE-HIT] Serving cached data for: {}", cache_key);
 
             match cached_result {
                 Ok(data) => {
@@ -433,7 +446,35 @@ where
             return;
         }
 
-        // Cache miss - set loading and spawn async task
+        // Cache miss - check if this is due to invalidation and we should use SWR behavior
+        let is_invalidation_refresh = refresh_registry.get_refresh_count(&cache_key) > 0;
+        
+        if is_invalidation_refresh {
+            // This is an invalidation refresh - use SWR behavior to prevent jitters
+            // Don't show loading state immediately, let SWR handle background revalidation
+            crate::debug_log!("🔄 [INVALIDATION] Cache miss due to invalidation for: {}, using SWR behavior", cache_key);
+            
+            // Set up background revalidation without showing loading state
+            let cache_clone = cache.clone();
+            let cache_key_clone = cache_key.clone();
+            let provider = provider.clone();
+            let param = param.clone();
+            let refresh_registry_clone = refresh_registry.clone();
+            
+            spawn(async move {
+                let result = provider.run(param).await;
+                let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
+                if updated {
+                    refresh_registry_clone.trigger_refresh(&cache_key_clone);
+                    crate::debug_log!("✅ [INVALIDATION] Background revalidation completed for: {}", cache_key_clone);
+                }
+            });
+            
+            // Don't set loading state - let the component handle the absence of data gracefully
+            return;
+        }
+
+        // Regular cache miss - set loading and spawn async task
         let cache_clone = cache.clone();
         let cache_key_clone = cache_key.clone();
         let provider = provider.clone();
@@ -444,7 +485,7 @@ where
         let task = spawn(async move {
             let result = provider.run(param).await;
             let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
-            debug!(
+            crate::debug_log!(
                 "📊 [CACHE-STORE] Attempted to store new data for: {} (updated: {})",
                 cache_key_clone, updated
             );
@@ -463,258 +504,6 @@ where
 }
 
 /// Performs SWR staleness checking and triggers background revalidation if needed
-fn check_and_handle_swr_core<P, Param>(
-    provider: &P,
-    param: &Param,
-    cache_key: &str,
-    cache: &ProviderCache,
-    refresh_registry: &RefreshRegistry,
-) where
-    P: Provider<Param> + Clone,
-    Param: ProviderParamBounds,
-{
-    let stale_time = provider.stale_time();
-    let cache_expiration = provider.cache_expiration();
-
-    if let Some(stale_duration) = stale_time {
-        if let Ok(cache_lock) = cache.cache.lock() {
-            if let Some(entry) = cache_lock.get(cache_key) {
-                if entry.is_stale(stale_duration)
-                    && !entry.is_expired(cache_expiration.unwrap_or(Duration::from_secs(3600)))
-                    && !refresh_registry.is_revalidation_in_progress(cache_key)
-                {
-                    // Data is stale but not expired and no revalidation in progress - trigger background revalidation
-                    if refresh_registry.start_revalidation(cache_key) {
-                        debug!(
-                            "🔄 [SWR] Data is stale for key: {} - triggering background revalidation",
-                            cache_key
-                        );
-
-                        let cache = cache.clone();
-                        let cache_key_clone = cache_key.to_string();
-                        let provider = provider.clone();
-                        let param = param.clone();
-                        let refresh_registry_clone = refresh_registry.clone();
-
-                        spawn(async move {
-                            let result = provider.run(param).await;
-                            let updated = cache.set(cache_key_clone.clone(), result);
-                            refresh_registry_clone.complete_revalidation(&cache_key_clone);
-                            if updated {
-                                refresh_registry_clone.trigger_refresh(&cache_key_clone);
-                                debug!(
-                                    "✅ [SWR] Background revalidation completed for key: {} (value changed)",
-                                    cache_key_clone
-                                );
-                            } else {
-                                debug!(
-                                    "✅ [SWR] Background revalidation completed for key: {} (value unchanged)",
-                                    cache_key_clone
-                                );
-                            }
-                        });
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Sets up interval refresh task for a provider
-fn setup_interval_task_core<P, Param>(
-    provider: &P,
-    param: &Param,
-    cache_key: &str,
-    cache: &ProviderCache,
-    refresh_registry: &RefreshRegistry,
-) where
-    P: Provider<Param> + Clone + Send,
-    Param: ProviderParamBounds,
-{
-    if let Some(interval) = provider.interval() {
-        let cache_clone = cache.clone();
-        let provider_clone = provider.clone();
-        let param_clone = param.clone();
-        let cache_key_clone = cache_key.to_string();
-        let refresh_registry_clone = refresh_registry.clone();
-
-        refresh_registry.start_interval_task(cache_key, interval, move || {
-            // Re-execute the provider and update cache in background
-            let cache_for_task = cache_clone.clone();
-            let provider_for_task = provider_clone.clone();
-            let param_for_task = param_clone.clone();
-            let cache_key_for_task = cache_key_clone.clone();
-            let refresh_registry_for_task = refresh_registry_clone.clone();
-
-            spawn(async move {
-                let result = provider_for_task.run(param_for_task).await;
-                let updated = cache_for_task.set(cache_key_for_task.clone(), result);
-                // Only trigger refresh if value changed
-                if updated {
-                    refresh_registry_for_task.trigger_refresh(&cache_key_for_task);
-                }
-            });
-        });
-    }
-}
-
-/// Sets up automatic cache expiration monitoring for providers
-fn setup_cache_expiration_task_core<P, Param>(
-    provider: &P,
-    _param: &Param,
-    cache_key: &str,
-    cache: &ProviderCache,
-    refresh_registry: &RefreshRegistry,
-) where
-    P: Provider<Param> + Clone + Send,
-    Param: ProviderParamBounds,
-{
-    if let Some(expiration) = provider.cache_expiration() {
-        let cache_clone = cache.clone();
-        let cache_key_clone = cache_key.to_string();
-        let refresh_registry_clone = refresh_registry.clone();
-
-        refresh_registry.start_periodic_task(
-            cache_key,
-            TaskType::CacheExpiration,
-            expiration / 4, // Check every quarter of the expiration time
-            move || {
-                // Check if cache entry has expired
-                if let Ok(mut cache_lock) = cache_clone.cache.lock() {
-                    if let Some(entry) = cache_lock.get(&cache_key_clone) {
-                        if entry.is_expired(expiration) {
-                            debug!(
-                                "🗑️ [AUTO-EXPIRATION] Cache expired for key: {} - triggering reactive refresh",
-                                cache_key_clone
-                            );
-                            cache_lock.remove(&cache_key_clone);
-                            drop(cache_lock); // Release lock before triggering refresh
-
-                            // Trigger refresh to mark all reactive contexts as dirty
-                            refresh_registry_clone.trigger_refresh(&cache_key_clone);
-                        }
-                    }
-                }
-            },
-        );
-    }
-}
-
-/// Sets up automatic stale-checking task for SWR providers
-fn setup_stale_check_task_core<P, Param>(
-    provider: &P,
-    param: &Param,
-    cache_key: &str,
-    cache: &ProviderCache,
-    refresh_registry: &RefreshRegistry,
-) where
-    P: Provider<Param> + Clone + Send,
-    Param: ProviderParamBounds,
-{
-    if let Some(stale_time) = provider.stale_time() {
-        let cache_clone = cache.clone();
-        let provider_clone = provider.clone();
-        let param_clone = param.clone();
-        let cache_key_clone = cache_key.to_string();
-        let refresh_registry_clone = refresh_registry.clone();
-
-        refresh_registry.start_stale_check_task(cache_key, stale_time, move || {
-            // Check if data is stale and trigger revalidation if needed
-            check_and_handle_swr_core(
-                &provider_clone,
-                &param_clone,
-                &cache_key_clone,
-                &cache_clone,
-                &refresh_registry_clone,
-            );
-        });
-    }
-}
-
-/// Shared cache expiration logic
-fn check_and_handle_cache_expiration(
-    cache_expiration: Option<Duration>,
-    cache_key: &str,
-    cache: &ProviderCache,
-    refresh_registry: &RefreshRegistry,
-) {
-    if let Some(expiration) = cache_expiration {
-        if let Ok(mut cache_lock) = cache.cache.lock() {
-            if let Some(entry) = cache_lock.get(cache_key) {
-                if entry.is_expired(expiration) {
-                    debug!(
-                        "🗑️ [CACHE EXPIRATION] Removing expired cache entry for key: {}",
-                        cache_key
-                    );
-                    cache_lock.remove(cache_key);
-                    // Trigger a refresh to re-execute the provider
-                    refresh_registry.trigger_refresh(cache_key);
-                }
-            }
-        }
-    }
-}
-
-/// Sets up intelligent cache management for a provider
-///
-/// This replaces the old component-unmount auto-dispose with a better system:
-/// 1. Access-time tracking for LRU management
-/// 2. Periodic cleanup of unused entries based on cache_expiration
-/// 3. Cache size limits with LRU eviction
-/// 4. Automatic background cleanup tasks
-fn setup_intelligent_cache_management<P, Param>(
-    provider: &P,
-    cache_key: &str,
-    cache: &ProviderCache,
-    refresh_registry: &RefreshRegistry,
-) where
-    P: Provider<Param> + Clone,
-    Param: ProviderParamBounds,
-{
-    // Set up periodic cleanup task for this provider if cache_expiration is configured
-    if let Some(cache_expiration) = provider.cache_expiration() {
-        let cleanup_interval = std::cmp::max(
-            cache_expiration / 4,    // Clean up 4x more frequently than expiration
-            Duration::from_secs(30), // But at least every 30 seconds
-        );
-
-        let cache_clone = cache.clone();
-        let unused_threshold = cache_expiration * 2; // Remove entries unused for 2x expiration time
-        let cleanup_key = format!("{cache_key}_cleanup");
-
-        refresh_registry.start_periodic_task(
-            &cleanup_key,
-            TaskType::CacheCleanup,
-            cleanup_interval,
-            move || {
-                // Remove entries that haven't been accessed recently
-                let removed = cache_clone.cleanup_unused_entries(unused_threshold);
-                if removed > 0 {
-                    debug!(
-                        "🧹 [SMART-CLEANUP] Removed {} unused cache entries",
-                        removed
-                    );
-                }
-
-                // Enforce cache size limits (configurable - could be made dynamic)
-                const MAX_CACHE_SIZE: usize = 1000;
-                let evicted = cache_clone.evict_lru_entries(MAX_CACHE_SIZE);
-                if evicted > 0 {
-                    debug!(
-                        "🗑️ [LRU-EVICT] Evicted {} entries due to cache size limit",
-                        evicted
-                    );
-                }
-            },
-        );
-
-        debug!(
-            "📊 [SMART-CACHE] Intelligent cache management enabled for: {} (cleanup every {:?})",
-            cache_key, cleanup_interval
-        );
-    }
-}
-
 /// Unified hook for using any provider - automatically detects parameterized vs non-parameterized providers
 ///
 /// This is the main hook for consuming providers in Dioxus components. It automatically
