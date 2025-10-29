@@ -37,11 +37,11 @@ pub mod prelude {
     pub use crate::provider_state::{AsyncState, ProviderState};
 
     // Global initialization
-    pub use crate::global::{ProviderConfig, init, init_global_providers};
+    pub use crate::global::{ProviderConfig, init};
 
     // Dependency Injection
     pub use crate::injection::{
-        clear_dependencies, has_dependency, init_dependency_injection, inject, register_dependency,
+        clear_dependencies, has_dependency, inject, register_dependency,
     };
 
     // Mutation system - Manual Implementation Pattern

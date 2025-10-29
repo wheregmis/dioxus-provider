@@ -117,6 +117,13 @@ pub fn init_dependency_injection() {
     DEPENDENCY_REGISTRY.get_or_init(DependencyRegistry::new);
 }
 
+/// Ensure the dependency injection registry is initialized (non-deprecated helper)
+///
+/// This is used internally by the new unified initialization path.
+pub(crate) fn ensure_dependency_injection_initialized() {
+    DEPENDENCY_REGISTRY.get_or_init(DependencyRegistry::new);
+}
+
 /// Register a global dependency
 pub fn register_dependency<T: Send + Sync + 'static>(dependency: T) -> Result<(), ProviderError> {
     let registry = DEPENDENCY_REGISTRY.get().ok_or_else(|| {

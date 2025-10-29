@@ -22,7 +22,7 @@ tracing = ["dep:tracing"]
 plain-logs = ["tracing"]
 
 [dependencies]
-dioxus = { version = "0.7.0-rc.2", default-features = false, features = [
+dioxus = { version = "0.7.0-rc.3", default-features = false, features = [
     "macro",
     "hooks",
     "signals",
@@ -60,11 +60,11 @@ serde_json = { version = "1.0.145", features = ["std"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # Desktop-only dependencies for examples
-dioxus = { version = "0.7.0-rc.2", features = ["desktop"] }
+dioxus = { version = "0.7.0-rc.3", features = ["desktop"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 # Web-only dependencies for examples
-dioxus = { version = "0.7.0-rc.2", features = ["web"] }
+dioxus = { version = "0.7.0-rc.3", features = ["web"] }
 
 
 [profile]

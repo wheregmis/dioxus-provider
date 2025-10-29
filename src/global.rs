@@ -50,7 +50,7 @@ impl ProviderConfig {
 
         // Initialize dependency injection if enabled
         if self.enable_dependency_injection {
-            crate::injection::init_dependency_injection();
+            crate::injection::ensure_dependency_injection_initialized();
         }
 
         Ok(())
