@@ -1,7 +1,7 @@
 [package]
 name = "dioxus-provider"
 description = "Data fetching and caching library for Dioxus applications with intelligent caching strategies and global providers."
-version = "0.0.7"
+version.workspace = true
 edition = "2024"
 license = "MIT"
 authors = ["Sabin Regmi <get2sabin@gmail.com>"]
@@ -10,6 +10,9 @@ homepage = "https://wheregmis.github.io"
 repository = "https://github.com/wheregmis/dioxus-provider.git"
 keywords = ["dioxus", "data-fetching", "caching", "providers", "swr"]
 categories = ["gui", "asynchronous", "web-programming"]
+
+[workspace.package]
+version = "0.2.0"
 
 [workspace]
 members = [".", "dioxus-provider-macros"]
@@ -28,7 +31,7 @@ dioxus = { version = "0.7.0-rc.3", default-features = false, features = [
     "signals",
 ] }
 # dioxus-provider-macros = { version = "0.1.1" }
-dioxus-provider-macros = { version = "0.1.3", path = "./dioxus-provider-macros" }
+dioxus-provider-macros = { version = "*", path = "./dioxus-provider-macros" }
 futures = "0.3"
 tracing = { version = "0.1.41", optional = true }
 thiserror = "2.0.17"

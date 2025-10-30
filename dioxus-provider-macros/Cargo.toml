@@ -1,6 +1,6 @@
 [package]
 name = "dioxus-provider-macros"
-version = "0.1.3"
+version.workspace = true
 edition = "2024"
 description = "Procedural macros for dioxus-provider - declarative data fetching and caching for Dioxus applications"
 license = "MIT"

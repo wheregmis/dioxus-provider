@@ -1239,7 +1239,7 @@ dependencies = [
 
 [[package]]
 name = "dioxus-provider"
-version = "0.0.7"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "dioxus",
@@ -1258,7 +1258,7 @@ dependencies = [
 
 [[package]]
 name = "dioxus-provider-macros"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "humantime",
  "proc-macro2",
