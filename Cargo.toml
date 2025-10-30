@@ -31,7 +31,7 @@ dioxus = { version = "0.7.0-rc.3", default-features = false, features = [
     "signals",
 ] }
 # dioxus-provider-macros = { version = "0.1.1" }
-dioxus-provider-macros = { version = "*", path = "./dioxus-provider-macros" }
+dioxus-provider-macros = { version = "0.2.0", path = "./dioxus-provider-macros" }
 futures = "0.3"
 tracing = { version = "0.1.41", optional = true }
 thiserror = "2.0.17"
