@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use dioxus_provider::hooks::ProviderState;
 use dioxus_provider::prelude::*;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
@@ -47,9 +46,9 @@ fn CounterApp() -> Element {
             },
             h2 { class: "text-lg font-semibold mt-4", "Provider State:" },
             match &*counter.read() {
-                ProviderState::Loading { .. } => rsx! { p { "Loading counter..." } },
-                ProviderState::Success(val) => rsx! { p { "Counter (from provider): {val}" } },
-                ProviderState::Error(err) => rsx! { p { "Error: {err}" } },
+                State::Loading { .. } => rsx! { p { "Loading counter..." } },
+                State::Success(val) => rsx! { p { "Counter (from provider): {val}" } },
+                State::Error(err) => rsx! { p { "Error: {err}" } },
             },
             h2 { class: "text-lg font-semibold mt-4", "Mutation State:" },
             match &*state.read() {
@@ -64,6 +63,6 @@ fn CounterApp() -> Element {
 
 fn main() {
     COUNTER.store(0, Ordering::SeqCst);
-    dioxus_provider::init();
+    let _ = dioxus_provider::init();
     dioxus::launch(CounterApp);
 }

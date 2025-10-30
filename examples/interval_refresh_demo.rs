@@ -12,7 +12,6 @@
 //! - Cache integration with interval refresh
 
 use dioxus::prelude::*;
-use dioxus_provider::hooks::ProviderState;
 use dioxus_provider::prelude::*;
 use std::{
     sync::atomic::{AtomicU32, Ordering},
@@ -126,7 +125,7 @@ pub struct BusinessMetrics {
 
 fn main() {
     // Initialize global providers for application-wide cache management
-    dioxus_provider::init();
+    let _ = dioxus_provider::init();
 
     println!("🚀 Starting Interval Refresh Demo");
     println!("⏰ Demonstrating automatic background data refresh at configurable intervals");
@@ -190,9 +189,9 @@ fn SystemMetricsCard() -> Element {
             div { class: "card-header",
                 h3 { "System Metrics (5s interval)" }
                 div { class: match &*data.read() {
-                    ProviderState::Loading { .. } => "status loading",
-                    ProviderState::Error(_) => "status error",
-                    ProviderState::Success(_) => "status success",
+                    State::Loading { .. } => "status loading",
+                    State::Error(_) => "status error",
+                    State::Success(_) => "status success",
                 }}
             }
 
@@ -200,18 +199,18 @@ fn SystemMetricsCard() -> Element {
 
             div { class: "card-content",
                 match &*data.read() {
-                    ProviderState::Loading { .. } => rsx! {
+                    State::Loading { .. } => rsx! {
                         div { class: "loading-state",
                             div { class: "spinner" }
                             span { "Loading..." }
                         }
                     },
-                    ProviderState::Error(e) => rsx! {
+                    State::Error(e) => rsx! {
                         div { class: "error-state",
                             span { "❌ Error: {e}" }
                         }
                     },
-                    ProviderState::Success(metrics) => rsx! {
+                    State::Success(metrics) => rsx! {
                         div { class: "data-grid",
                             div { class: "metric",
                                 span { class: "label", "Disk Usage:" }
@@ -250,9 +249,9 @@ fn BusinessMetricsCard() -> Element {
             div { class: "card-header",
                 h3 { "Business Metrics (10s interval)" }
                 div { class: match &*data.read() {
-                    ProviderState::Loading { .. } => "status loading",
-                    ProviderState::Error(_) => "status error",
-                    ProviderState::Success(_) => "status success",
+                    State::Loading { .. } => "status loading",
+                    State::Error(_) => "status error",
+                    State::Success(_) => "status success",
                 }}
             }
 
@@ -260,18 +259,18 @@ fn BusinessMetricsCard() -> Element {
 
             div { class: "card-content",
                 match &*data.read() {
-                    ProviderState::Loading { .. } => rsx! {
+                    State::Loading { .. } => rsx! {
                         div { class: "loading-state",
                             div { class: "spinner" }
                             span { "Loading..." }
                         }
                     },
-                    ProviderState::Error(e) => rsx! {
+                    State::Error(e) => rsx! {
                         div { class: "error-state",
                             span { "❌ Error: {e}" }
                         }
                     },
-                    ProviderState::Success(metrics) => rsx! {
+                    State::Success(metrics) => rsx! {
                         div { class: "data-grid",
                             div { class: "metric",
                                 span { class: "label", "Daily Revenue:" }
@@ -305,13 +304,13 @@ fn BusinessMetricsCard() -> Element {
 fn MetricsCard(
     title: String,
     description: String,
-    data: Signal<ProviderState<LiveStats, String>>,
+    data: Signal<State<LiveStats, String>>,
     color_class: String,
 ) -> Element {
     let status_class = match &*data.read() {
-        ProviderState::Loading { .. } => "status loading",
-        ProviderState::Error(_) => "status error",
-        ProviderState::Success(_) => "status success",
+        State::Loading { .. } => "status loading",
+        State::Error(_) => "status error",
+        State::Success(_) => "status success",
     };
 
     rsx! {
@@ -325,18 +324,18 @@ fn MetricsCard(
 
             div { class: "card-content",
                 match &*data.read() {
-                    ProviderState::Loading { .. } => rsx! {
+                    State::Loading { .. } => rsx! {
                         div { class: "loading-state",
                             div { class: "spinner" }
                             span { "Loading..." }
                         }
                     },
-                    ProviderState::Error(e) => rsx! {
+                    State::Error(e) => rsx! {
                         div { class: "error-state",
                             span { "❌ Error: {e}" }
                         }
                     },
-                    ProviderState::Success(stats) => rsx! {
+                    State::Success(stats) => rsx! {
                         div { class: "data-grid",
                             div { class: "metric",
                                 span { class: "label", "Active Users:" }

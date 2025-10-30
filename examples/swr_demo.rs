@@ -1,3 +1,4 @@
+#![allow(unpredictable_function_pointer_comparisons)]
 //! # SWR (Stale-While-Revalidate) Demo
 //!
 //! This example demonstrates the basic SWR pattern using dioxus-provider.
@@ -20,7 +21,6 @@
 //! - Global provider management
 
 use dioxus::prelude::*;
-use dioxus_provider::hooks::ProviderState;
 use dioxus_provider::prelude::*;
 use std::{
     sync::atomic::{AtomicU32, Ordering},
@@ -239,23 +239,23 @@ fn SWRDataDisplay<
     T: 'static + Clone + PartialEq,
     E: 'static + Clone + PartialEq + std::fmt::Display,
 >(
-    data: Signal<ProviderState<T, E>>,
+    data: Signal<State<T, E>>,
     render_success: fn(&T) -> Element,
 ) -> Element {
     match &*data.read() {
-        ProviderState::Loading { .. } => rsx! {
+        State::Loading { .. } => rsx! {
             div { class: "loading-container",
                 div { class: "loading-spinner" }
                 span { "Fetching fresh data..." }
             }
         },
-        ProviderState::Error(e) => rsx! {
+        State::Error(e) => rsx! {
             div { class: "error-container",
                 span { class: "error-icon", "❌" }
                 span { class: "error-message", "Error: {e}" }
             }
         },
-        ProviderState::Success(value) => render_success(value),
+        State::Success(value) => render_success(value),
     }
 }
 
@@ -268,7 +268,7 @@ fn app() -> Element {
 
 fn main() {
     // Initialize global providers for application-wide cache management
-    dioxus_provider::init();
+    let _ = dioxus_provider::init();
 
     println!("🚀 Starting SWR Demo");
     println!("🔄 Demonstrating Stale-While-Revalidate pattern");

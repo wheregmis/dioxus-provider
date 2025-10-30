@@ -4,8 +4,7 @@
 //! expires, components immediately show loading state and then fetch fresh data.
 
 use dioxus::prelude::*;
-use dioxus_provider::hooks::ProviderState;
-use dioxus_provider::{global::init_global_providers, prelude::*};
+use dioxus_provider::prelude::*;
 use std::time::Duration;
 
 // Cross-platform sleep function
@@ -48,17 +47,17 @@ fn App() -> Element {
             div { style: "margin: 20px 0; padding: 20px; border: 1px solid #ccc;",
                 h3 { "Test Data (expires in 5s):" }
                 match &*data.read() {
-                    ProviderState::Loading { .. } => rsx! {
+                    State::Loading { .. } => rsx! {
                         div { style: "color: orange;",
                             "🔄 Loading data..."
                         }
                     },
-                    ProviderState::Success(result) => rsx! {
+                    State::Success(result) => rsx! {
                         div { style: "color: green;",
                             "✅ Success: {result}"
                         }
                     },
-                    ProviderState::Error(err) => rsx! {
+                    State::Error(err) => rsx! {
                         div { style: "color: red;",
                             "❌ Error: {err}"
                         }
@@ -80,7 +79,7 @@ fn App() -> Element {
 
 fn main() {
     // Initialize global providers
-    dioxus_provider::init();
+    let _ = dioxus_provider::init();
 
     println!("🚀 Starting Reactive Cache Expiration Test");
     println!("📋 Expected behavior:");

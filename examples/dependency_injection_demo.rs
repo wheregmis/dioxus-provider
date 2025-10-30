@@ -7,7 +7,6 @@
 #![allow(dead_code)]
 
 use dioxus::prelude::*;
-use dioxus_provider::hooks::ProviderState;
 use dioxus_provider::prelude::*;
 
 // Example dependencies that don't implement PartialEq/Hash
@@ -168,26 +167,26 @@ fn UserProfile(user_id: u32) -> Element {
             }
 
             match user() {
-                ProviderState::Loading { .. } => rsx! {
+                State::Loading { .. } => rsx! {
                     div { class: "loading", "Loading user..." }
                 },
-                ProviderState::Success(user) => rsx! {
+                State::Success(user) => rsx! {
                     div { class: "user-info",
                         h2 { "{user.name}" }
                         p { "Email: {user.email}" }
                         p { "ID: {user.id}" }
                     }
                 },
-                ProviderState::Error(err) => rsx! {
+                State::Error(err) => rsx! {
                     div { class: "error", "Error loading user: {err}" }
                 },
             }
 
             match posts() {
-                ProviderState::Loading { .. } => rsx! {
+                State::Loading { .. } => rsx! {
                     div { class: "loading", "Loading posts..." }
                 },
-                ProviderState::Success(posts) => rsx! {
+                State::Success(posts) => rsx! {
                     div { class: "posts",
                         h3 { "Posts" }
                         for post in posts {
@@ -198,7 +197,7 @@ fn UserProfile(user_id: u32) -> Element {
                         }
                     }
                 },
-                ProviderState::Error(err) => rsx! {
+                State::Error(err) => rsx! {
                     div { class: "error", "Error loading posts: {err}" }
                 },
             }
@@ -224,27 +223,27 @@ fn CachedUserProfile(user_id: u32) -> Element {
             p { style: "color: #666; font-size: 0.9em;", "User ID: {user_id}" }
 
             match cached_user() {
-                ProviderState::Loading { .. } => rsx! {
+                State::Loading { .. } => rsx! {
                     div { class: "loading", "Loading cached user..." }
                 },
-                ProviderState::Success(user) => rsx! {
+                State::Success(user) => rsx! {
                     div { class: "user-info",
                         h4 { "{user.name}" }
                         p { "Email: {user.email}" }
                         small { "This data is cached for 30 seconds" }
                     }
                 },
-                ProviderState::Error(err) => rsx! {
+                State::Error(err) => rsx! {
                     div { class: "error", "Error loading cached user: {err}" }
                 },
             }
 
             h4 { "Fresh Posts (10s stale time)" }
             match fresh_posts() {
-                ProviderState::Loading { .. } => rsx! {
+                State::Loading { .. } => rsx! {
                     div { class: "loading", "Loading fresh posts..." }
                 },
-                ProviderState::Success(posts) => rsx! {
+                State::Success(posts) => rsx! {
                     div { class: "posts",
                         for post in posts {
                             div { class: "post",
@@ -259,7 +258,7 @@ fn CachedUserProfile(user_id: u32) -> Element {
                         small { "Posts become stale after 10 seconds but are refreshed in background" }
                     }
                 },
-                ProviderState::Error(err) => rsx! {
+                State::Error(err) => rsx! {
                     div { class: "error", "Error loading fresh posts: {err}" }
                 },
             }

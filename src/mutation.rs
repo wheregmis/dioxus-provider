@@ -35,7 +35,7 @@ pub enum MutationState<T, E> {
     Error(E),
 }
 
-impl<T, E> crate::provider_state::AsyncState for MutationState<T, E> {
+impl<T, E> crate::state::AsyncState for MutationState<T, E> {
     type Data = T;
     type Error = E;
 
@@ -74,27 +74,27 @@ impl<T, E> MutationState<T, E> {
 
     /// Returns true if the mutation is currently loading
     pub fn is_loading(&self) -> bool {
-        <Self as crate::provider_state::AsyncState>::is_loading(self)
+        <Self as crate::state::AsyncState>::is_loading(self)
     }
 
     /// Returns true if the mutation completed successfully
     pub fn is_success(&self) -> bool {
-        <Self as crate::provider_state::AsyncState>::is_success(self)
+        <Self as crate::state::AsyncState>::is_success(self)
     }
 
     /// Returns true if the mutation failed
     pub fn is_error(&self) -> bool {
-        <Self as crate::provider_state::AsyncState>::is_error(self)
+        <Self as crate::state::AsyncState>::is_error(self)
     }
 
     /// Returns the success data if available
     pub fn data(&self) -> Option<&T> {
-        <Self as crate::provider_state::AsyncState>::data(self)
+        <Self as crate::state::AsyncState>::data(self)
     }
 
     /// Returns the error if available
     pub fn error(&self) -> Option<&E> {
-        <Self as crate::provider_state::AsyncState>::error(self)
+        <Self as crate::state::AsyncState>::error(self)
     }
 }
 

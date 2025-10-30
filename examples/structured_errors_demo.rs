@@ -3,7 +3,6 @@
 //! This example demonstrates the new structured error handling capabilities
 
 use dioxus::prelude::*;
-use dioxus_provider::hooks::ProviderState;
 use dioxus_provider::prelude::*;
 use std::time::Duration;
 
@@ -145,10 +144,10 @@ fn UserProfile(user_id: u32) -> Element {
             }
 
             match &*user_data.read() {
-                ProviderState::Loading { .. } => rsx! {
+                State::Loading { .. } => rsx! {
                     div { class: "text-blue-500", "Loading user..." }
                 },
-                ProviderState::Success(user) => rsx! {
+                State::Success(user) => rsx! {
                     div { class: "bg-white rounded-lg shadow p-6",
                         h2 { class: "text-xl font-semibold mb-4", "User Information" }
                         p { "Name: {user.name}" }
@@ -156,7 +155,7 @@ fn UserProfile(user_id: u32) -> Element {
                         p { "Status: {user.status:?}" }
                     }
                 },
-                ProviderState::Error(error) => rsx! {
+                State::Error(error) => rsx! {
                     div { class: "bg-red-50 border border-red-200 rounded p-4",
                         h3 { class: "text-red-800 font-medium", "Error" }
                         p { class: "text-red-700", "{error}" }
@@ -249,7 +248,7 @@ fn App() -> Element {
 
 fn main() {
     // Initialize provider system with dependency injection
-    dioxus_provider::init();
+    let _ = dioxus_provider::init();
 
     register_dependency(ApiClient::new("https://api.example.com".to_string())).unwrap();
 

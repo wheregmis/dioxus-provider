@@ -45,6 +45,6 @@ fn App() -> Element {
 }
 
 fn main() {
-    dioxus_provider::init();
+    let _ = dioxus_provider::init();
     launch(App);
 }

@@ -164,13 +164,13 @@ pub fn ItemsList() -> Element {
         div {
             h2 { "Items List" }
             match &*items.read() {
-                ProviderState::Loading { .. } => rsx! {
+                State::Loading { .. } => rsx! {
                     div { "Loading..." }
                 },
-                ProviderState::Error(err) => rsx! {
+                State::Error(err) => rsx! {
                     div { "Error: {err}" }
                 },
-                ProviderState::Success(items) => {
+                State::Success(items) => {
                     if items.is_empty() {
                         rsx! {
                             div { "No items" }
