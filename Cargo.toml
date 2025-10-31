@@ -12,7 +12,7 @@ keywords = ["dioxus", "data-fetching", "caching", "providers", "swr"]
 categories = ["gui", "asynchronous", "web-programming"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 
 [workspace]
 members = [".", "dioxus-provider-macros"]
@@ -31,7 +31,7 @@ dioxus = { version = "0.7.0", default-features = false, features = [
     "signals",
 ] }
 # dioxus-provider-macros = { version = "0.1.1" }
-dioxus-provider-macros = { version = "0.2.0", path = "./dioxus-provider-macros" }
+dioxus-provider-macros = { version = "0.2.1", path = "./dioxus-provider-macros" }
 futures = "0.3"
 tracing = { version = "0.1.41", optional = true }
 thiserror = "2.0.17"

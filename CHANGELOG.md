@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-v0.2.0...dioxus-provider-v0.2.1) - 2025-10-31
+
+### <!-- 3 -->Other
+
+- Reapply "These should be not send"
+- Bump Dioxus to 0.7
+
 ## [0.0.7](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-v0.0.6...dioxus-provider-v0.0.7) - 2025-10-29
 
 ### <!-- 2 -->Fixes
