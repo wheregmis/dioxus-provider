@@ -160,7 +160,7 @@ impl RefreshRegistry {
         interval: Duration,
         task_fn: F,
     ) where
-        F: Fn() + 'static,
+        F: Fn() + Send + 'static,
     {
         if let Ok(mut tasks) = self.periodic_tasks.lock() {
             let task_key = format!("{key}:{task_type:?}");
@@ -236,7 +236,7 @@ impl RefreshRegistry {
     /// This is a convenience method for starting interval refresh tasks.
     pub fn start_interval_task<F>(&self, key: &str, interval: Duration, refresh_fn: F)
     where
-        F: Fn() + 'static,
+        F: Fn() + Send + 'static,
     {
         self.start_periodic_task(key, TaskType::IntervalRefresh, interval, refresh_fn);
     }
@@ -246,7 +246,7 @@ impl RefreshRegistry {
     /// This is a convenience method for starting stale checking tasks.
     pub fn start_stale_check_task<F>(&self, key: &str, stale_time: Duration, stale_check_fn: F)
     where
-        F: Fn() + 'static,
+        F: Fn() + Send + 'static,
     {
         self.start_periodic_task(key, TaskType::StaleCheck, stale_time, stale_check_fn);
     }
