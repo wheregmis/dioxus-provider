@@ -3,7 +3,6 @@
 use dioxus::prelude::*;
 use std::time::Duration;
 
-
 use crate::{
     cache::ProviderCache,
     refresh::{RefreshRegistry, TaskType},
@@ -25,7 +24,7 @@ pub fn setup_interval_task_core<P, Param>(
     cache: &ProviderCache,
     refresh_registry: &RefreshRegistry,
 ) where
-    P: Provider<Param> + Clone + Send,
+    P: Provider<Param> + Clone,
     Param: ProviderParamBounds,
 {
     if let Some(interval) = provider.interval() {
@@ -103,7 +102,7 @@ pub fn setup_cache_expiration_task_core<P, Param>(
     cache: &ProviderCache,
     refresh_registry: &RefreshRegistry,
 ) where
-    P: Provider<Param> + Clone + Send,
+    P: Provider<Param> + Clone,
     Param: ProviderParamBounds,
 {
     if let Some(expiration) = provider.cache_expiration() {
@@ -195,7 +194,7 @@ pub fn setup_stale_check_task_core<P, Param>(
     cache: &ProviderCache,
     refresh_registry: &RefreshRegistry,
 ) where
-    P: Provider<Param> + Clone + Send,
+    P: Provider<Param> + Clone,
     Param: ProviderParamBounds,
 {
     if let Some(stale_time) = provider.stale_time() {
