@@ -1,3 +1,4 @@
+#![allow(unpredictable_function_pointer_comparisons)]
 //! # Cache Expiration Demo
 //!
 //! This example demonstrates cache expiration functionality in dioxus-provider.
@@ -16,8 +17,7 @@
 //! - Global provider management (NEW!)
 
 use dioxus::prelude::*;
-use dioxus_provider::hooks::ProviderState;
-use dioxus_provider::{global::init_global_providers, prelude::*};
+use dioxus_provider::prelude::*;
 use std::{
     sync::atomic::{AtomicU32, Ordering},
     time::Duration,
@@ -397,13 +397,13 @@ fn CacheExpirationDemo() -> Element {
 fn CacheCard<T: 'static + Clone + PartialEq, E: 'static + Clone + PartialEq + std::fmt::Display>(
     title: String,
     cache_type: &'static str,
-    data: Signal<ProviderState<T, E>>,
+    data: Signal<State<T, E>>,
     render_success: fn(&T) -> Element,
 ) -> Element {
     let cache_status = match &*data.read() {
-        ProviderState::Loading { .. } => "cache-miss",
-        ProviderState::Success(_) => "cache-hit",
-        ProviderState::Error(_) => "cache-error",
+        State::Loading { .. } => "cache-miss",
+        State::Success(_) => "cache-hit",
+        State::Error(_) => "cache-error",
     };
 
     rsx! {
@@ -421,19 +421,19 @@ fn CacheCard<T: 'static + Clone + PartialEq, E: 'static + Clone + PartialEq + st
             }
             div { class: "card-content",
                 match &*data.read() {
-                    ProviderState::Loading { .. } => rsx! {
+                    State::Loading { .. } => rsx! {
                         div { class: "loading-container",
                             div { class: "loading-spinner" }
                             span { "Cache expired - fetching fresh data..." }
                         }
                     },
-                    ProviderState::Error(e) => rsx! {
+                    State::Error(e) => rsx! {
                         div { class: "error-container",
                             span { class: "error-icon", "❌" }
                             span { class: "error-message", "Error: {e}" }
                         }
                     },
-                    ProviderState::Success(value) => render_success(value),
+                    State::Success(value) => render_success(value),
                 }
             }
         }
@@ -496,7 +496,7 @@ fn main() {
     tracing_subscriber::fmt::init();
 
     // Initialize global providers at application startup
-    dioxus_provider::init();
+    let _ = dioxus_provider::init();
 
     launch(app);
 }

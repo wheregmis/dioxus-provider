@@ -362,7 +362,7 @@ pub fn TodoList(filter: Filter) -> Element {
     let todos = use_provider(load_todos(), ());
 
     let filtered_todos = match &*todos.read() {
-        ProviderState::Success(todos) => {
+        State::Success(todos) => {
             let filtered: Vec<Todo> = match filter {
                 Filter::All => todos.clone(),
                 Filter::Active => todos.iter().filter(|t| !t.completed).cloned().collect(),
@@ -376,13 +376,13 @@ pub fn TodoList(filter: Filter) -> Element {
     rsx! {
         div { class: "w-full",
             match &*todos.read() {
-                ProviderState::Loading { .. } => rsx! {
+                State::Loading { .. } => rsx! {
                     div { class: "text-center text-gray-500", "Loading todos..." }
                 },
-                ProviderState::Error(err) => rsx! {
+                State::Error(err) => rsx! {
                     div { class: "text-center text-red-500", "Failed to load todos: {err}" }
                 },
-                ProviderState::Success(_) => rsx! {
+                State::Success(_) => rsx! {
                     if let Some(filtered) = filtered_todos {
                         if filtered.is_empty() {
                             div { class: "text-center text-gray-500", "No todos found" }
@@ -440,13 +440,13 @@ pub fn TodoStatsDisplay() -> Element {
     rsx! {
         div { class: "bg-blue-50 border border-blue-200 rounded-lg p-4",
             match &*stats.read() {
-                ProviderState::Loading { .. } => rsx! {
+                State::Loading { .. } => rsx! {
                     div { class: "text-center text-blue-600", "Loading stats..." }
                 },
-                ProviderState::Error(err) => rsx! {
+                State::Error(err) => rsx! {
                     div { class: "text-center text-red-500", "Failed to load stats: {err}" }
                 },
-                ProviderState::Success(stats) => rsx! {
+                State::Success(stats) => rsx! {
                     div { class: "grid grid-cols-2 md:grid-cols-4 gap-4 text-center",
                         div { class: "space-y-1",
                             div { class: "text-2xl font-bold text-blue-600", "{stats.total}" }

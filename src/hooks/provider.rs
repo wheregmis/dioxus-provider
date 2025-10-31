@@ -32,7 +32,6 @@ use dioxus::{
 };
 use std::{fmt::Debug, future::Future, time::Duration};
 
-
 use crate::{
     cache::ProviderCache,
     global::{get_global_cache, get_global_refresh_registry},
@@ -50,7 +49,7 @@ use super::internal::tasks::{
     setup_stale_check_task_core,
 };
 
-pub use crate::provider_state::ProviderState;
+pub use crate::state::State;
 
 /// A unified trait for defining providers - async operations that return data
 ///
@@ -175,16 +174,12 @@ impl From<RenderError> for dioxus_core::RenderError {
 }
 
 // Update SuspenseSignalExt to use ProviderState
-impl<T: Clone + 'static, E: Clone + 'static> SuspenseSignalExt<T, E>
-    for Signal<ProviderState<T, E>>
-{
+impl<T: Clone + 'static, E: Clone + 'static> SuspenseSignalExt<T, E> for Signal<State<T, E>> {
     fn suspend(&self) -> Result<Result<T, E>, RenderError> {
         match &*self.read() {
-            ProviderState::Loading { task } => {
-                Err(RenderError::Suspended(SuspendedFuture::new(*task)))
-            }
-            ProviderState::Success(data) => Ok(Ok(data.clone())),
-            ProviderState::Error(error) => Ok(Err(error.clone())),
+            State::Loading { task } => Err(RenderError::Suspended(SuspendedFuture::new(*task))),
+            State::Success(data) => Ok(Ok(data.clone())),
+            State::Error(error) => Ok(Err(error.clone())),
         }
     }
 }
@@ -351,7 +346,7 @@ pub trait UseProvider<Args> {
     type Error: ProviderErrorBounds;
 
     /// Use the provider with the given arguments
-    fn use_provider(self, args: Args) -> Signal<ProviderState<Self::Output, Self::Error>>;
+    fn use_provider(self, args: Args) -> Signal<State<Self::Output, Self::Error>>;
 }
 
 /// Unified implementation for all providers using parameter normalization
@@ -366,22 +361,19 @@ where
     type Output = P::Output;
     type Error = P::Error;
 
-    fn use_provider(self, args: Args) -> Signal<ProviderState<Self::Output, Self::Error>> {
+    fn use_provider(self, args: Args) -> Signal<State<Self::Output, Self::Error>> {
         let param = args.into_param();
         use_provider_core(self, param)
     }
 }
 
 /// Core provider implementation that handles all the common logic
-fn use_provider_core<P, Param>(
-    provider: P,
-    param: Param,
-) -> Signal<ProviderState<P::Output, P::Error>>
+fn use_provider_core<P, Param>(provider: P, param: Param) -> Signal<State<P::Output, P::Error>>
 where
     P: Provider<Param> + Send + Clone,
     Param: ProviderParamBounds,
 {
-    let mut state = use_signal(|| ProviderState::Loading {
+    let mut state = use_signal(|| State::Loading {
         task: spawn(async {}),
     });
     let cache = get_provider_cache();
@@ -406,7 +398,8 @@ where
         #[cfg(feature = "tracing")]
         crate::debug_log!(
             "🔄 [USE_PROVIDER] Memo executing for key: {} with param: {:?}",
-            cache_key, param
+            cache_key,
+            param
         );
 
         // Subscribe to refresh events for this cache key if we have a reactive context
@@ -434,12 +427,12 @@ where
             match cached_result {
                 Ok(data) => {
                     let _ = spawn(async move {
-                        state.set(ProviderState::Success(data));
+                        state.set(State::Success(data));
                     });
                 }
                 Err(error) => {
                     let _ = spawn(async move {
-                        state.set(ProviderState::Error(error));
+                        state.set(State::Error(error));
                     });
                 }
             }
@@ -448,28 +441,34 @@ where
 
         // Cache miss - check if this is due to invalidation and we should use SWR behavior
         let is_invalidation_refresh = refresh_registry.get_refresh_count(&cache_key) > 0;
-        
+
         if is_invalidation_refresh {
             // This is an invalidation refresh - use SWR behavior to prevent jitters
             // Don't show loading state immediately, let SWR handle background revalidation
-            crate::debug_log!("🔄 [INVALIDATION] Cache miss due to invalidation for: {}, using SWR behavior", cache_key);
-            
+            crate::debug_log!(
+                "🔄 [INVALIDATION] Cache miss due to invalidation for: {}, using SWR behavior",
+                cache_key
+            );
+
             // Set up background revalidation without showing loading state
             let cache_clone = cache.clone();
             let cache_key_clone = cache_key.clone();
             let provider = provider.clone();
             let param = param.clone();
             let refresh_registry_clone = refresh_registry.clone();
-            
+
             spawn(async move {
                 let result = provider.run(param).await;
                 let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
                 if updated {
                     refresh_registry_clone.trigger_refresh(&cache_key_clone);
-                    crate::debug_log!("✅ [INVALIDATION] Background revalidation completed for: {}", cache_key_clone);
+                    crate::debug_log!(
+                        "✅ [INVALIDATION] Background revalidation completed for: {}",
+                        cache_key_clone
+                    );
                 }
             });
-            
+
             // Don't set loading state - let the component handle the absence of data gracefully
             return;
         }
@@ -487,17 +486,18 @@ where
             let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
             crate::debug_log!(
                 "📊 [CACHE-STORE] Attempted to store new data for: {} (updated: {})",
-                cache_key_clone, updated
+                cache_key_clone,
+                updated
             );
             if updated {
                 // Only update state and trigger rerender if value changed
                 match result {
-                    Ok(data) => state_for_async.set(ProviderState::Success(data)),
-                    Err(error) => state_for_async.set(ProviderState::Error(error)),
+                    Ok(data) => state_for_async.set(State::Success(data)),
+                    Err(error) => state_for_async.set(State::Error(error)),
                 }
             }
         });
-        state.set(ProviderState::Loading { task });
+        state.set(State::Loading { task });
     }));
 
     state
@@ -553,7 +553,7 @@ where
 ///     }
 /// }
 /// ```
-pub fn use_provider<P, Args>(provider: P, args: Args) -> Signal<ProviderState<P::Output, P::Error>>
+pub fn use_provider<P, Args>(provider: P, args: Args) -> Signal<State<P::Output, P::Error>>
 where
     P: UseProvider<Args>,
 {

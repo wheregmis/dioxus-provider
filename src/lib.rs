@@ -10,8 +10,8 @@ mod log_utils;
 pub mod mutation;
 pub mod param_utils;
 pub mod platform;
-mod provider_state;
 pub mod refresh;
+mod state;
 pub mod types;
 
 // Re-export commonly used items at crate root for convenience
@@ -34,15 +34,13 @@ pub mod prelude {
     pub use crate::hooks::use_provider_cache;
 
     // The async state enum, needed for matching
-    pub use crate::provider_state::{AsyncState, ProviderState};
+    pub use crate::state::{AsyncState, State};
 
     // Global initialization
     pub use crate::global::{ProviderConfig, init};
 
     // Dependency Injection
-    pub use crate::injection::{
-        clear_dependencies, has_dependency, inject, register_dependency,
-    };
+    pub use crate::injection::{clear_dependencies, has_dependency, inject, register_dependency};
 
     // Mutation system - Manual Implementation Pattern
     pub use crate::mutation::{

@@ -1,5 +1,4 @@
 use dioxus::prelude::*;
-use dioxus_provider::hooks::ProviderState;
 use dioxus_provider::platform::sleep;
 use dioxus_provider::prelude::*;
 use std::time::Duration;
@@ -21,7 +20,7 @@ fn UserAgeCard(user_id: u32) -> Element {
     let state = use_provider(fetch_user_age(), user_id);
 
     // Use combinators to transform and handle the state
-    let message: ProviderState<String, String> = state
+    let message: State<String, String> = state
         .read()
         .clone()
         .map(|age| format!("User is {age} years old."))
@@ -29,17 +28,17 @@ fn UserAgeCard(user_id: u32) -> Element {
         .and_then(|msg| {
             // Only show a special message if age > 21
             if msg.contains("25") {
-                ProviderState::Success(format!("{msg} (Eligible for premium features!)"))
+                State::Success(format!("{msg} (Eligible for premium features!)"))
             } else {
-                ProviderState::Success(msg)
+                State::Success(msg)
             }
         });
 
     rsx! {
         match &message {
-            ProviderState::Loading { .. } => rsx!(div { "Loading age..." }),
-            ProviderState::Success(msg) => rsx!(div { "{msg}" }),
-            ProviderState::Error(err) => rsx!(div { style: "color: red;", "{err}" }),
+            State::Loading { .. } => rsx!(div { "Loading age..." }),
+            State::Success(msg) => rsx!(div { "{msg}" }),
+            State::Error(err) => rsx!(div { style: "color: red;", "{err}" }),
         }
     }
 }
@@ -61,6 +60,6 @@ fn App() -> Element {
 }
 
 fn main() {
-    dioxus_provider::init();
+    let _ = dioxus_provider::init();
     launch(App);
 }

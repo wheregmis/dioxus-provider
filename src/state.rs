@@ -1,6 +1,6 @@
-//! ProviderState: Async state enum for dioxus-provider
+//! State: Async state enum for dioxus-provider
 //!
-//! This module provides the `ProviderState` enum and the `AsyncState` trait for working
+//! This module provides the `State` enum and the `AsyncState` trait for working
 //! with asynchronous operations in dioxus-provider.
 
 use dioxus::core::Task;
@@ -8,7 +8,7 @@ use dioxus::core::Task;
 /// Common trait for async state types that represent loading, success, and error states
 ///
 /// This trait provides a unified interface for working with different async state types
-/// in dioxus-provider, such as `ProviderState` and `MutationState`.
+/// in dioxus-provider, such as `State` and `MutationState`.
 pub trait AsyncState {
     /// The type of successful data
     type Data;
@@ -33,7 +33,7 @@ pub trait AsyncState {
 
 /// Represents the state of an async operation
 #[derive(Clone, PartialEq, Debug)]
-pub enum ProviderState<T, E> {
+pub enum State<T, E> {
     /// The operation is currently loading
     Loading { task: Task },
     /// The operation completed successfully with data
@@ -42,38 +42,38 @@ pub enum ProviderState<T, E> {
     Error(E),
 }
 
-impl<T, E> AsyncState for ProviderState<T, E> {
+impl<T, E> AsyncState for State<T, E> {
     type Data = T;
     type Error = E;
 
     fn is_loading(&self) -> bool {
-        matches!(self, ProviderState::Loading { task: _ })
+        matches!(self, State::Loading { task: _ })
     }
 
     fn is_success(&self) -> bool {
-        matches!(self, ProviderState::Success(_))
+        matches!(self, State::Success(_))
     }
 
     fn is_error(&self) -> bool {
-        matches!(self, ProviderState::Error(_))
+        matches!(self, State::Error(_))
     }
 
     fn data(&self) -> Option<&T> {
         match self {
-            ProviderState::Success(data) => Some(data),
+            State::Success(data) => Some(data),
             _ => None,
         }
     }
 
     fn error(&self) -> Option<&E> {
         match self {
-            ProviderState::Error(error) => Some(error),
+            State::Error(error) => Some(error),
             _ => None,
         }
     }
 }
 
-impl<T, E> ProviderState<T, E> {
+impl<T, E> State<T, E> {
     /// Returns true if the state is currently loading
     pub fn is_loading(&self) -> bool {
         <Self as AsyncState>::is_loading(self)
@@ -99,39 +99,39 @@ impl<T, E> ProviderState<T, E> {
         <Self as AsyncState>::error(self)
     }
 
-    /// Maps a ProviderState<T, E> to ProviderState<U, E> by applying a function to the contained data if successful.
-    pub fn map<U, F>(self, op: F) -> ProviderState<U, E>
+    /// Maps a State<T, E> to State<U, E> by applying a function to the contained data if successful.
+    pub fn map<U, F>(self, op: F) -> State<U, E>
     where
         F: FnOnce(T) -> U,
     {
         match self {
-            ProviderState::Success(data) => ProviderState::Success(op(data)),
-            ProviderState::Error(e) => ProviderState::Error(e),
-            ProviderState::Loading { task } => ProviderState::Loading { task },
+            State::Success(data) => State::Success(op(data)),
+            State::Error(e) => State::Error(e),
+            State::Loading { task } => State::Loading { task },
         }
     }
 
-    /// Maps a ProviderState<T, E> to ProviderState<T, F> by applying a function to the contained error if failed.
-    pub fn map_err<F, O>(self, op: O) -> ProviderState<T, F>
+    /// Maps a State<T, E> to State<T, F> by applying a function to the contained error if failed.
+    pub fn map_err<F, O>(self, op: O) -> State<T, F>
     where
         O: FnOnce(E) -> F,
     {
         match self {
-            ProviderState::Success(data) => ProviderState::Success(data),
-            ProviderState::Error(e) => ProviderState::Error(op(e)),
-            ProviderState::Loading { task } => ProviderState::Loading { task },
+            State::Success(data) => State::Success(data),
+            State::Error(e) => State::Error(op(e)),
+            State::Loading { task } => State::Loading { task },
         }
     }
 
-    /// Chains a ProviderState<T, E> to ProviderState<U, E> by applying a function to the contained data if successful.
-    pub fn and_then<U, F>(self, op: F) -> ProviderState<U, E>
+    /// Chains a State<T, E> to State<U, E> by applying a function to the contained data if successful.
+    pub fn and_then<U, F>(self, op: F) -> State<U, E>
     where
-        F: FnOnce(T) -> ProviderState<U, E>,
+        F: FnOnce(T) -> State<U, E>,
     {
         match self {
-            ProviderState::Success(data) => op(data),
-            ProviderState::Error(e) => ProviderState::Error(e),
-            ProviderState::Loading { task } => ProviderState::Loading { task },
+            State::Success(data) => op(data),
+            State::Error(e) => State::Error(e),
+            State::Loading { task } => State::Loading { task },
         }
     }
 }
