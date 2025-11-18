@@ -25,7 +25,7 @@ tracing = ["dep:tracing"]
 plain-logs = ["tracing"]
 
 [dependencies]
-dioxus = { version = "0.7.0", default-features = false, features = [
+dioxus = { version = "0.7.1", default-features = false, features = [
     "macro",
     "hooks",
     "signals",
