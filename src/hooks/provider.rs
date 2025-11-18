@@ -405,19 +405,21 @@ where
         
         // Clean up previous cache key's tasks if it changed
         let prev_key = prev_cache_key.read().clone();
-        if !prev_key.is_empty() && prev_key != cache_key {
-            refresh_registry.stop_interval_task(&prev_key);
-            refresh_registry.stop_periodic_task(&prev_key, crate::refresh::TaskType::CacheExpiration);
-            refresh_registry.stop_periodic_task(&prev_key, crate::refresh::TaskType::StaleCheck);
+        if prev_key != cache_key {
+            if !prev_key.is_empty() {
+                refresh_registry.stop_interval_task(&prev_key);
+                refresh_registry.stop_periodic_task(&prev_key, crate::refresh::TaskType::CacheExpiration);
+                refresh_registry.stop_periodic_task(&prev_key, crate::refresh::TaskType::StaleCheck);
+                
+                let cleanup_key = format!("{prev_key}_cleanup");
+                refresh_registry.stop_periodic_task(&cleanup_key, crate::refresh::TaskType::CacheCleanup);
+                
+                crate::debug_log!("🧹 [CLEANUP] Stopped all tasks for previous cache key: {}", prev_key);
+            }
             
-            let cleanup_key = format!("{prev_key}_cleanup");
-            refresh_registry.stop_periodic_task(&cleanup_key, crate::refresh::TaskType::CacheCleanup);
-            
-            crate::debug_log!("🧹 [CLEANUP] Stopped all tasks for previous cache key: {}", prev_key);
+            // Only update tracked cache key if it actually changed to avoid unnecessary re-renders
+            prev_cache_key.set(cache_key.clone());
         }
-        
-        // Update tracked cache key
-        prev_cache_key.set(cache_key.clone());
 
         // Subscribe to refresh events for this cache key if we have a reactive context
         if let Some(reactive_context) = ReactiveContext::current() {
@@ -443,14 +445,20 @@ where
 
             match cached_result {
                 Ok(data) => {
-                    let _ = spawn(async move {
-                        state.set(State::Success(data));
-                    });
+                    // Only update state if it's different to avoid unnecessary re-renders
+                    if !matches!(*state.read(), State::Success(ref d) if d == &data) {
+                        let _ = spawn(async move {
+                            state.set(State::Success(data));
+                        });
+                    }
                 }
                 Err(error) => {
-                    let _ = spawn(async move {
-                        state.set(State::Error(error));
-                    });
+                    // Only update state if it's different to avoid unnecessary re-renders
+                    if !matches!(*state.read(), State::Error(ref e) if e == &error) {
+                        let _ = spawn(async move {
+                            state.set(State::Error(error));
+                        });
+                    }
                 }
             }
             return;
@@ -490,9 +498,12 @@ where
             // cause this memo to re-run and find the cached data
             // Note: The component is already subscribed to refresh events above, so it will
             // be notified when the shared request completes
-            state.set(State::Loading {
-                task: spawn(async {}), // Dummy task - we're waiting for the shared request
-            });
+            // Only set loading if not already loading to avoid re-render loops
+            if !state.read().is_loading() {
+                state.set(State::Loading {
+                    task: spawn(async {}), // Dummy task - we're waiting for the shared request
+                });
+            }
             return;
         }
 
