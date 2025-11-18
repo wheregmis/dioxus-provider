@@ -342,10 +342,12 @@ fn generate_provider(input_fn: ItemFn, provider_args: ProviderArgs) -> Result<To
                 type Output = #output_type;
                 type Error = #error_type;
 
-                fn run(&self, _param: ()) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> 
-                    #[cfg(not(target_family = "wasm"))]
-                    + ::std::marker::Send
-                {
+                #[cfg(not(target_family = "wasm"))]
+                fn run(&self, _param: ()) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                    Self::call()
+                }
+                #[cfg(target_family = "wasm")]
+                fn run(&self, _param: ()) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
                     Self::call()
                 }
 
@@ -373,10 +375,12 @@ fn generate_provider(input_fn: ItemFn, provider_args: ProviderArgs) -> Result<To
                 type Output = #output_type;
                 type Error = #error_type;
 
-                fn run(&self, #param_name: #param_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>>
-                    #[cfg(not(target_family = "wasm"))]
-                    + ::std::marker::Send
-                {
+                #[cfg(not(target_family = "wasm"))]
+                fn run(&self, #param_name: #param_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                    Self::call(#param_name)
+                }
+                #[cfg(target_family = "wasm")]
+                fn run(&self, #param_name: #param_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
                     Self::call(#param_name)
                 }
 
@@ -404,10 +408,13 @@ fn generate_provider(input_fn: ItemFn, provider_args: ProviderArgs) -> Result<To
                 type Output = #output_type;
                 type Error = #error_type;
 
-                fn run(&self, params: #tuple_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>>
-                    #[cfg(not(target_family = "wasm"))]
-                    + ::std::marker::Send
-                {
+                #[cfg(not(target_family = "wasm"))]
+                fn run(&self, params: #tuple_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                    let (#(#param_names,)*) = params;
+                    Self::call(#(#param_names,)*)
+                }
+                #[cfg(target_family = "wasm")]
+                fn run(&self, params: #tuple_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
                     let (#(#param_names,)*) = params;
                     Self::call(#(#param_names,)*)
                 }
@@ -545,35 +552,8 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
     };
 
     let (mutate_signature, mutate_body) = {
-        // Generate Send bound conditionally: not required on WASM
-        let send_bound = quote! {
-            #[cfg(not(target_family = "wasm"))]
-            + ::std::marker::Send
-        };
+        let mut prelude = Vec::<TokenStream2>::new();
         
-        let (signature, mut prelude) = match input_count {
-            0 => (
-                quote! { fn mutate(&self, _input: ()) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> #send_bound },
-                Vec::<TokenStream2>::new(),
-            ),
-            1 => {
-                let param = &input_params[0];
-                let name = &param.name;
-                let ty = &param.ty;
-                (
-                    quote! { fn mutate(&self, #name: #ty) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> #send_bound },
-                    Vec::<TokenStream2>::new(),
-                )
-            }
-            _ => {
-                let names: Vec<_> = input_params.iter().map(|p| &p.name).collect();
-                (
-                    quote! { fn mutate(&self, input: #input_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> #send_bound },
-                    vec![quote! { let (#(#names),*) = input; }],
-                )
-            }
-        };
-
         // Create MutationContext if needed in manual mode
         if !is_auto_apply {
             if let (Some(ctx_ident), Some(data_ty), Some(err_ty)) = (
@@ -595,50 +575,55 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
 
         let call_expr = quote! { Self::call(#(#call_args),*) };
         let body = quote! { async move { #(#prelude)* #call_expr.await } };
-        (signature, body)
-    };
-
-    let (mutate_with_current_signature, mutate_with_current_body) = {
-        // Generate Send bound conditionally: not required on WASM
-        let send_bound = quote! {
-            #[cfg(not(target_family = "wasm"))]
-            + ::std::marker::Send
-        };
         
-        let (signature, mut prelude) = match input_count {
-            0 => (
-                quote! { fn mutate_with_current(
-                    &self,
-                    _input: (),
-                    current_data: Option<&Result<Self::Output, Self::Error>>,
-                ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> #send_bound },
-                Vec::<TokenStream2>::new(),
-            ),
+        // Generate full function with cfg for Send bound
+        let signature_with_body = match input_count {
+            0 => quote! {
+                #[cfg(not(target_family = "wasm"))]
+                fn mutate(&self, _input: ()) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                    #body
+                }
+                #[cfg(target_family = "wasm")]
+                fn mutate(&self, _input: ()) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
+                    #body
+                }
+            },
             1 => {
                 let param = &input_params[0];
                 let name = &param.name;
                 let ty = &param.ty;
-                (
-                    quote! { fn mutate_with_current(
-                        &self,
-                        #name: #ty,
-                        current_data: Option<&Result<Self::Output, Self::Error>>,
-                    ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> #send_bound },
-                    Vec::<TokenStream2>::new(),
-                )
+                quote! {
+                    #[cfg(not(target_family = "wasm"))]
+                    fn mutate(&self, #name: #ty) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                        #body
+                    }
+                    #[cfg(target_family = "wasm")]
+                    fn mutate(&self, #name: #ty) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
+                        #body
+                    }
+                }
             }
             _ => {
                 let names: Vec<_> = input_params.iter().map(|p| &p.name).collect();
-                (
-                    quote! { fn mutate_with_current(
-                        &self,
-                        input: #input_type,
-                        current_data: Option<&Result<Self::Output, Self::Error>>,
-                    ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> #send_bound },
-                    vec![quote! { let (#(#names),*) = input; }],
-                )
+                quote! {
+                    #[cfg(not(target_family = "wasm"))]
+                    fn mutate(&self, input: #input_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                        let (#(#names),*) = input;
+                        #body
+                    }
+                    #[cfg(target_family = "wasm")]
+                    fn mutate(&self, input: #input_type) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
+                        let (#(#names),*) = input;
+                        #body
+                    }
+                }
             }
         };
+        (signature_with_body, quote! {})
+    };
+
+    let (mutate_with_current_signature, mutate_with_current_body) = {
+        let mut prelude = Vec::<TokenStream2>::new();
 
         let call_args = if is_auto_apply {
             // Auto-apply mode: use current_data directly (already has optimistic update applied by runtime)
@@ -663,7 +648,75 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
 
         let call_expr = quote! { Self::call(#(#call_args),*) };
         let body = quote! { async move { #(#prelude)* #call_expr.await } };
-        (signature, body)
+        
+        // Generate full function with cfg for Send bound
+        let signature_with_body = match input_count {
+            0 => quote! {
+                #[cfg(not(target_family = "wasm"))]
+                fn mutate_with_current(
+                    &self,
+                    _input: (),
+                    current_data: Option<&Result<Self::Output, Self::Error>>,
+                ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                    #body
+                }
+                #[cfg(target_family = "wasm")]
+                fn mutate_with_current(
+                    &self,
+                    _input: (),
+                    current_data: Option<&Result<Self::Output, Self::Error>>,
+                ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
+                    #body
+                }
+            },
+            1 => {
+                let param = &input_params[0];
+                let name = &param.name;
+                let ty = &param.ty;
+                quote! {
+                    #[cfg(not(target_family = "wasm"))]
+                    fn mutate_with_current(
+                        &self,
+                        #name: #ty,
+                        current_data: Option<&Result<Self::Output, Self::Error>>,
+                    ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                        #body
+                    }
+                    #[cfg(target_family = "wasm")]
+                    fn mutate_with_current(
+                        &self,
+                        #name: #ty,
+                        current_data: Option<&Result<Self::Output, Self::Error>>,
+                    ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
+                        #body
+                    }
+                }
+            }
+            _ => {
+                let names: Vec<_> = input_params.iter().map(|p| &p.name).collect();
+                quote! {
+                    #[cfg(not(target_family = "wasm"))]
+                    fn mutate_with_current(
+                        &self,
+                        input: #input_type,
+                        current_data: Option<&Result<Self::Output, Self::Error>>,
+                    ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> + ::std::marker::Send {
+                        let (#(#names),*) = input;
+                        #body
+                    }
+                    #[cfg(target_family = "wasm")]
+                    fn mutate_with_current(
+                        &self,
+                        input: #input_type,
+                        current_data: Option<&Result<Self::Output, Self::Error>>,
+                    ) -> impl ::std::future::Future<Output = Result<Self::Output, Self::Error>> {
+                        let (#(#names),*) = input;
+                        #body
+                    }
+                }
+            }
+        };
+        (signature_with_body, quote! {})
     };
 
     let has_optimistic_impl = if has_optimistic {
@@ -681,13 +734,9 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
             type Output = #output_type;
             type Error = #error_type;
 
-            #mutate_signature {
-                #mutate_body
-            }
+            #mutate_signature
 
-            #mutate_with_current_signature {
-                #mutate_with_current_body
-            }
+            #mutate_with_current_signature
 
             #optimistic_impl
 
