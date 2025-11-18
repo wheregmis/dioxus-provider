@@ -251,6 +251,9 @@ impl CacheEntry {
 #[derive(Clone, Default)]
 pub struct ProviderCache {
     pub cache: Arc<Mutex<HashMap<String, CacheEntry>>>,
+    /// Tracks pending requests to enable request deduplication
+    /// Key: cache key, Value: number of components waiting for this request
+    pending_requests: Arc<Mutex<HashMap<String, u32>>>,
 }
 
 impl ProviderCache {
@@ -261,6 +264,75 @@ impl ProviderCache {
     /// A new `ProviderCache` instance.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Check if a request is currently pending for the given cache key
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The cache key to check
+    ///
+    /// # Returns
+    ///
+    /// `true` if a request is pending, `false` otherwise
+    pub fn is_request_pending(&self, key: &str) -> bool {
+        if let Ok(pending) = self.pending_requests.lock() {
+            pending.contains_key(key)
+        } else {
+            false
+        }
+    }
+
+    /// Mark a request as pending for the given cache key
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The cache key
+    ///
+    /// # Returns
+    ///
+    /// `true` if this is a new pending request (first component), `false` if already pending
+    pub fn mark_request_pending(&self, key: &str) -> bool {
+        if let Ok(mut pending) = self.pending_requests.lock() {
+            let count = pending.entry(key.to_string()).or_insert(0);
+            *count += 1;
+            *count == 1 // Return true if this is the first component waiting
+        } else {
+            false
+        }
+    }
+
+    /// Mark a request as no longer pending for the given cache key
+    ///
+    /// This should be called when the request completes. All waiting components
+    /// will be notified via the refresh mechanism, so we remove the entry entirely.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The cache key
+    pub fn mark_request_complete(&self, key: &str) {
+        if let Ok(mut pending) = self.pending_requests.lock() {
+            if pending.remove(key).is_some() {
+                crate::debug_log!("✅ [REQUEST-DEDUP] Request completed for key: {}", key);
+            }
+        }
+    }
+
+    /// Get the number of components waiting for a pending request
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The cache key
+    ///
+    /// # Returns
+    ///
+    /// The number of components waiting, or 0 if not pending
+    pub fn pending_request_count(&self, key: &str) -> u32 {
+        if let Ok(pending) = self.pending_requests.lock() {
+            *pending.get(key).unwrap_or(&0)
+        } else {
+            0
+        }
     }
 
     /// Retrieves a cached result by key.

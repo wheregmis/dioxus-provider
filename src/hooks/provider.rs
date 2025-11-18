@@ -463,6 +463,33 @@ where
             return;
         }
 
+        // Cache miss - check if a request is already pending (request deduplication)
+        let is_new_request = cache.mark_request_pending(&cache_key);
+        
+        if !is_new_request {
+            // Request is already pending - another component is fetching this data
+            // Subscribe to refresh events and wait for the shared request to complete
+            let pending_count = cache.pending_request_count(&cache_key);
+            crate::debug_log!(
+                "🔄 [REQUEST-DEDUP] Request already pending for key: {} ({} components waiting)",
+                cache_key,
+                pending_count
+            );
+            
+            // Set loading state and wait for the shared request to complete
+            // The refresh will be triggered when the pending request completes, which will
+            // cause this memo to re-run and find the cached data
+            // Note: The component is already subscribed to refresh events above, so it will
+            // be notified when the shared request completes
+            state.set(State::Loading {
+                task: spawn(async {}), // Dummy task - we're waiting for the shared request
+            });
+            return;
+        }
+
+        // This is a new request - we're the first component to request this data
+        crate::debug_log!("🆕 [REQUEST-DEDUP] Starting new request for key: {}", cache_key);
+
         // Cache miss - check if this is due to invalidation and we should use SWR behavior
         let is_invalidation_refresh = refresh_registry.get_refresh_count(&cache_key) > 0;
 
@@ -491,6 +518,8 @@ where
                         cache_key_clone
                     );
                 }
+                // Mark request as complete
+                cache_clone.mark_request_complete(&cache_key_clone);
             });
 
             // Don't set loading state - let the component handle the absence of data gracefully
@@ -502,6 +531,7 @@ where
         let cache_key_clone = cache_key.clone();
         let provider = provider.clone();
         let param = param.clone();
+        let refresh_registry_clone = refresh_registry.clone();
         let mut state_for_async = state;
 
         // Spawn the real async task and store the handle in Loading
@@ -520,6 +550,11 @@ where
                     Err(error) => state_for_async.set(State::Error(error)),
                 }
             }
+            // Mark request as complete - this will notify all waiting components via refresh
+            cache_clone.mark_request_complete(&cache_key_clone);
+            // Trigger refresh to notify all components waiting for this request
+            // This will cause their memos to re-run and find the cached data
+            refresh_registry_clone.trigger_refresh(&cache_key_clone);
         });
         state.set(State::Loading { task });
     }));
