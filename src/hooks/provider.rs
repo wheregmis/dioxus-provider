@@ -360,7 +360,7 @@ pub trait UseProvider<Args> {
 /// by using the `IntoProviderParam` trait to normalize different parameter formats.
 impl<P, Args> UseProvider<Args> for P
 where
-    P: Provider<Args::Param> + Clone,
+    P: Provider<Args::Param> + Send + Clone,
     Args: IntoProviderParam,
 {
     type Output = P::Output;
@@ -375,7 +375,7 @@ where
 /// Core provider implementation that handles all the common logic
 fn use_provider_core<P, Param>(provider: P, param: Param) -> Signal<State<P::Output, P::Error>>
 where
-    P: Provider<Param> + Clone,
+    P: Provider<Param> + Send + Clone,
     Param: ProviderParamBounds,
 {
     let mut state = use_signal(|| State::Loading {
