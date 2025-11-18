@@ -419,13 +419,6 @@ where
         // Update tracked cache key
         prev_cache_key.set(cache_key.clone());
 
-        #[cfg(feature = "tracing")]
-        crate::debug_log!(
-            "🔄 [USE_PROVIDER] Memo executing for key: {} with param: {:?}",
-            cache_key,
-            param
-        );
-
         // Subscribe to refresh events for this cache key if we have a reactive context
         if let Some(reactive_context) = ReactiveContext::current() {
             refresh_registry.subscribe_to_refresh(&cache_key, reactive_context);
@@ -446,7 +439,7 @@ where
         // Check cache for valid data
         if let Some(cached_result) = cache.get::<Result<P::Output, P::Error>>(&cache_key) {
             // Access tracking is automatically handled by cache.get() updating last_accessed time
-            crate::debug_log!("📊 [CACHE-HIT] Serving cached data for: {}", cache_key);
+            // Removed verbose cache hit logging to reduce spam
 
             match cached_result {
                 Ok(data) => {
@@ -469,12 +462,28 @@ where
         if !is_new_request {
             // Request is already pending - another component is fetching this data
             // Subscribe to refresh events and wait for the shared request to complete
-            let pending_count = cache.pending_request_count(&cache_key);
-            crate::debug_log!(
-                "🔄 [REQUEST-DEDUP] Request already pending for key: {} ({} components waiting)",
-                cache_key,
-                pending_count
-            );
+            // Only log periodically to avoid spam (every 100th component or power of 2)
+            #[cfg(feature = "tracing")]
+            {
+                let pending_count = cache.pending_request_count(&cache_key);
+                // Log only at powers of 2 or every 100th increment to reduce spam
+                if pending_count == 1 
+                    || pending_count == 2 
+                    || pending_count == 4 
+                    || pending_count == 8 
+                    || pending_count == 16 
+                    || pending_count == 100 
+                    || pending_count == 200 
+                    || pending_count == 500 
+                    || pending_count % 1000 == 0
+                {
+                    crate::debug_log!(
+                        "🔄 [REQUEST-DEDUP] Request already pending for key: {} ({} components waiting)",
+                        cache_key,
+                        pending_count
+                    );
+                }
+            }
             
             // Set loading state and wait for the shared request to complete
             // The refresh will be triggered when the pending request completes, which will
