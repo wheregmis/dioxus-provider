@@ -43,9 +43,8 @@ use crate::types::{ProviderErrorBounds, ProviderOutputBounds, ProviderParamBound
 
 // Import helper functions from internal modules
 use super::internal::cache_mgmt::setup_intelligent_cache_management;
-use super::internal::swr::check_and_handle_swr_core;
 use super::internal::tasks::{
-    check_and_handle_cache_expiration, setup_cache_expiration_task_core, setup_interval_task_core,
+    setup_cache_expiration_task_core, setup_interval_task_core,
     setup_stale_check_task_core,
 };
 
@@ -384,18 +383,6 @@ where
     let cache = get_provider_cache();
     let refresh_registry = get_refresh_registry();
 
-    let cache_key = provider.id(&param);
-    let cache_expiration = provider.cache_expiration();
-
-    // Setup intelligent cache management (replaces old auto-dispose system)
-    setup_intelligent_cache_management(&provider, &cache_key, &cache, &refresh_registry);
-
-    // Check cache expiration before the memo - this happens on every render
-    check_and_handle_cache_expiration(cache_expiration, &cache_key, &cache, &refresh_registry);
-
-    // SWR staleness checking - runs on every render to check for stale data
-    check_and_handle_swr_core(&provider, &param, &cache_key, &cache, &refresh_registry);
-
     // Track previous cache key for cleanup
     let mut prev_cache_key = use_signal(|| String::new());
 
@@ -421,6 +408,10 @@ where
             prev_cache_key.set(cache_key.clone());
         }
 
+        // Setup intelligent cache management (replaces old auto-dispose system)
+        // Only set up once per cache key to avoid duplicate tasks
+        setup_intelligent_cache_management(&provider, &cache_key, &cache, &refresh_registry);
+
         // Subscribe to refresh events for this cache key if we have a reactive context
         if let Some(reactive_context) = ReactiveContext::current() {
             refresh_registry.subscribe_to_refresh(&cache_key, reactive_context);
@@ -429,14 +420,20 @@ where
         // Read the current refresh count (this makes the memo reactive to changes)
         let _current_refresh_count = refresh_registry.get_refresh_count(&cache_key);
 
-        // Set up cache expiration monitoring task
+        // Set up cache expiration monitoring task (idempotent - won't create duplicates)
         setup_cache_expiration_task_core(&provider, &param, &cache_key, &cache, &refresh_registry);
 
-        // Set up interval task if provider has interval configured
+        // Set up interval task if provider has interval configured (idempotent)
         setup_interval_task_core(&provider, &param, &cache_key, &cache, &refresh_registry);
 
-        // Set up stale check task if provider has stale time configured
+        // Set up stale check task if provider has stale time configured (idempotent)
+        // The stale check task will handle periodic SWR revalidation in the background
         setup_stale_check_task_core(&provider, &param, &cache_key, &cache, &refresh_registry);
+
+        // Note: We don't check expiration or SWR here to avoid loops
+        // - Cache expiration is handled by the periodic cache expiration task
+        // - SWR staleness checking is handled by the periodic stale check task
+        // - These periodic tasks run in the background without causing re-render loops
 
         // Check cache for valid data
         if let Some(cached_result) = cache.get::<Result<P::Output, P::Error>>(&cache_key) {
