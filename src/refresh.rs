@@ -142,7 +142,7 @@ impl RefreshRegistry {
         }
     }
 
-    /// Start a periodic task for automatic provider operations
+    /// Start a periodic task for automatic provider operations (WASM version)
     ///
     /// Creates a background task that will call the provided function at regular
     /// intervals. Supports both interval refresh and stale checking operations.
@@ -153,6 +153,97 @@ impl RefreshRegistry {
     ///
     /// Uses `dioxus::spawn` to create tasks that work on both web and desktop platforms.
     /// Tasks can be cancelled explicitly using stop_* methods, which set a cancellation flag.
+    #[cfg(target_family = "wasm")]
+    pub fn start_periodic_task<F>(
+        &self,
+        key: &str,
+        task_type: TaskType,
+        interval: Duration,
+        task_fn: F,
+    ) where
+        F: Fn() + 'static,
+    {
+        if let Ok(mut tasks) = self.periodic_tasks.lock() {
+            let task_key = format!("{key}:{task_type:?}");
+
+            // For certain task types, don't create multiple tasks for the same provider
+            if (task_type == TaskType::StaleCheck || task_type == TaskType::CacheExpiration)
+                && tasks
+                    .iter()
+                    .any(|(k, (t, _, _))| k.starts_with(&format!("{key}:")) && *t == task_type)
+            {
+                return;
+            }
+
+            // Cancel existing task if it exists and the new interval is shorter (for interval tasks)
+            let should_create_new_task = match tasks.get(&task_key) {
+                None => true,
+                Some((_, current_interval, cancel_flag)) => {
+                    if task_type == TaskType::IntervalRefresh && interval < *current_interval {
+                        // Signal existing task to stop
+                        cancel_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                        tasks.remove(&task_key);
+                        true
+                    } else {
+                        false // Don't replace stale check or cache expiration tasks
+                    }
+                }
+            };
+
+            if should_create_new_task {
+                // Adjust interval for different task types
+                let actual_interval = match task_type {
+                    TaskType::StaleCheck => Duration::max(
+                        Duration::min(interval / 4, Duration::from_secs(30)),
+                        Duration::from_secs(1),
+                    ),
+                    TaskType::CacheExpiration => Duration::max(
+                        Duration::min(interval / 4, Duration::from_secs(30)),
+                        Duration::from_secs(1),
+                    ),
+                    _ => interval,
+                };
+
+                // Create cancellation flag for this task
+                let cancel_flag = Arc::new(AtomicBool::new(false));
+                let cancel_flag_clone = cancel_flag.clone();
+                let task_fn = Arc::new(task_fn);
+
+                spawn(async move {
+                    loop {
+                        // Check if task should be cancelled before sleeping
+                        if cancel_flag_clone.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+
+                        time::sleep(actual_interval).await;
+
+                        // Check if task should be cancelled before running
+                        if cancel_flag_clone.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+
+                        task_fn();
+                    }
+                });
+
+                tasks.insert(task_key, (task_type, interval, cancel_flag));
+            }
+        }
+    }
+
+    /// Start a periodic task for automatic provider operations (non-WASM version)
+    ///
+    /// Creates a background task that will call the provided function at regular
+    /// intervals. Supports both interval refresh and stale checking operations.
+    /// If an existing task exists with a longer interval, it will be replaced.
+    /// Tasks with shorter intervals are preserved to avoid unnecessary re-creation.
+    ///
+    /// ## Cross-Platform Implementation
+    ///
+    /// Uses `dioxus::spawn` to create tasks that work on both web and desktop platforms.
+    /// Tasks can be cancelled explicitly using stop_* methods, which set a cancellation flag.
+    #[cfg(not(target_family = "wasm"))]
     pub fn start_periodic_task<F>(
         &self,
         key: &str,
@@ -231,9 +322,21 @@ impl RefreshRegistry {
         }
     }
 
-    /// Start an interval task for automatic provider refresh
+    /// Start an interval task for automatic provider refresh (WASM version)
     ///
     /// This is a convenience method for starting interval refresh tasks.
+    #[cfg(target_family = "wasm")]
+    pub fn start_interval_task<F>(&self, key: &str, interval: Duration, refresh_fn: F)
+    where
+        F: Fn() + 'static,
+    {
+        self.start_periodic_task(key, TaskType::IntervalRefresh, interval, refresh_fn);
+    }
+
+    /// Start an interval task for automatic provider refresh (non-WASM version)
+    ///
+    /// This is a convenience method for starting interval refresh tasks.
+    #[cfg(not(target_family = "wasm"))]
     pub fn start_interval_task<F>(&self, key: &str, interval: Duration, refresh_fn: F)
     where
         F: Fn() + Send + 'static,
@@ -241,9 +344,21 @@ impl RefreshRegistry {
         self.start_periodic_task(key, TaskType::IntervalRefresh, interval, refresh_fn);
     }
 
-    /// Start a stale check task for SWR behavior
+    /// Start a stale check task for SWR behavior (WASM version)
     ///
     /// This is a convenience method for starting stale checking tasks.
+    #[cfg(target_family = "wasm")]
+    pub fn start_stale_check_task<F>(&self, key: &str, stale_time: Duration, stale_check_fn: F)
+    where
+        F: Fn() + 'static,
+    {
+        self.start_periodic_task(key, TaskType::StaleCheck, stale_time, stale_check_fn);
+    }
+
+    /// Start a stale check task for SWR behavior (non-WASM version)
+    ///
+    /// This is a convenience method for starting stale checking tasks.
+    #[cfg(not(target_family = "wasm"))]
     pub fn start_stale_check_task<F>(&self, key: &str, stale_time: Duration, stale_check_fn: F)
     where
         F: Fn() + Send + 'static,

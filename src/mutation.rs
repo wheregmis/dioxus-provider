@@ -340,7 +340,267 @@ impl MutationConfig {
     }
 }
 
-/// Core mutation logic shared between use_mutation and use_optimistic_mutation
+/// Core mutation logic shared between use_mutation and use_optimistic_mutation (WASM version)
+#[cfg(target_family = "wasm")]
+fn mutation_core<M, Input>(
+    mutation: M,
+    config: MutationConfig,
+) -> MutationHookResult<M, Input, impl Fn(Input) + Clone>
+where
+    M: Mutation<Input> + 'static,
+    Input: Clone + PartialEq + 'static,
+{
+    let state = use_signal(|| MutationState::Idle);
+    // Use an atomic flag to prevent concurrent mutations and race conditions
+    let mutation_in_progress: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    let cache = get_global_cache();
+    let refresh_registry = get_global_refresh_registry();
+
+    let mutate_fn = {
+        let mutation = mutation.clone();
+        let cache = cache
+            .unwrap_or_else(|_| {
+                panic!("Global providers not initialized. Call dioxus_provider::init() before using mutations.")
+            })
+            .clone();
+        let refresh_registry = refresh_registry
+            .unwrap_or_else(|_| {
+                panic!("Global providers not initialized. Call dioxus_provider::init() before using mutations.")
+            })
+            .clone();
+        let is_optimistic = config.optimistic;
+        let mutation_in_progress = mutation_in_progress.clone();
+
+        move |input: Input| {
+            // Prevent concurrent mutations using atomic compare-and-swap
+            // This ensures only one mutation runs at a time, preventing race conditions
+            let was_in_progress = mutation_in_progress.compare_exchange(
+                false,
+                true,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            );
+            
+            if was_in_progress.is_err() {
+                // Another mutation is already in progress
+                crate::debug_log!(
+                    "⏸️ [MUTATION] Skipping mutation - already in progress for: {}",
+                    mutation.id()
+                );
+                return;
+            }
+
+            // Double-check state to prevent race conditions
+            if matches!(*state.read(), MutationState::Loading) {
+                // Reset the flag since we're not proceeding
+                mutation_in_progress.store(false, Ordering::Release);
+                crate::debug_log!(
+                    "⏸️ [MUTATION] Skipping mutation - state is Loading for: {}",
+                    mutation.id()
+                );
+                return;
+            }
+
+            let mutation = mutation.clone();
+            let cache = cache.clone();
+            let refresh_registry = refresh_registry.clone();
+            let input = input.clone();
+            let mut ui_state = state;
+            let mutation_in_progress_for_cleanup = mutation_in_progress.clone();
+
+            // Set loading state atomically
+            ui_state.set(MutationState::Loading);
+
+            // Collect optimistic updates if enabled
+            let cache_keys_to_check: Vec<String> = mutation.invalidates();
+            let mut optimistic_updates = Vec::new();
+
+            if is_optimistic {
+                // First, try to get optimistic updates from providers that have cached data
+                for cache_key in &cache_keys_to_check {
+                    let current_data = cache.get::<Result<M::Output, M::Error>>(cache_key);
+                    let updates =
+                        mutation.optimistic_updates_with_current(&input, current_data.as_ref());
+                    optimistic_updates.extend(updates);
+                }
+
+                // If we don't have any optimistic updates yet, try the fallback method
+                if optimistic_updates.is_empty() {
+                    optimistic_updates = mutation.optimistic_updates(&input);
+                }
+
+                // If we still don't have optimistic updates, but we have cache keys to invalidate,
+                // we need to handle the case where some providers don't have cached data
+                if optimistic_updates.is_empty() && !cache_keys_to_check.is_empty() {
+                    // For providers without cached data, we'll use SWR behavior:
+                    // - Don't show loading state immediately
+                    // - Let them fetch in the background while showing stale data (if any)
+                    // - This prevents jitters for providers that don't have optimistic updates
+                    crate::debug_log!(
+                        "⚡ [OPTIMISTIC] No optimistic updates available, using SWR for {} cache keys",
+                        cache_keys_to_check.len()
+                    );
+                }
+
+                if !optimistic_updates.is_empty() {
+                    crate::debug_log!(
+                        "⚡ [OPTIMISTIC] Optimistically updating {} cache entries",
+                        optimistic_updates.len()
+                    );
+                    for (cache_key, optimistic_result) in &optimistic_updates {
+                        cache.set(cache_key.clone(), optimistic_result.clone());
+                        refresh_registry.trigger_refresh(cache_key);
+                    }
+                }
+            }
+
+            let optimistic_updates_for_rollback = optimistic_updates.clone();
+            let (result_tx, result_rx) = oneshot::channel::<Result<M::Output, M::Error>>();
+
+            spawn({
+                let mut state = ui_state;
+                async move {
+                    if let Ok(outcome) = result_rx.await {
+                        match outcome {
+                            Ok(result) => state.set(MutationState::Success(result)),
+                            Err(error) => state.set(MutationState::Error(error)),
+                        }
+                    }
+                }
+            });
+
+            dioxus_core::spawn_forever(async move {
+                // Ensure flag is reset even if mutation panics
+                let _cleanup_guard = MutationCleanupGuard {
+                    flag: mutation_in_progress_for_cleanup.clone(),
+                };
+
+                #[cfg(feature = "tracing")]
+                let mutation_type = if is_optimistic {
+                    "optimistic mutation"
+                } else {
+                    "mutation"
+                };
+                crate::debug_log!(
+                    "🔄 [MUTATION] Starting {}: {}",
+                    mutation_type,
+                    mutation.id()
+                );
+
+                // Get current data for the mutation
+                let mutation_current_data = cache_keys_to_check
+                    .first()
+                    .and_then(|first_key| cache.get::<Result<M::Output, M::Error>>(first_key));
+
+                let mutation_result = mutation
+                    .mutate_with_current(input, mutation_current_data.as_ref())
+                    .await;
+
+                crate::debug_log!(
+                    "📡 [MUTATION] Mutation completed for: {}, result: {}",
+                    mutation.id(),
+                    match &mutation_result {
+                        Ok(_) => "Success",
+                        Err(_) => "Error",
+                    }
+                );
+
+                match &mutation_result {
+                    Ok(result) => {
+                        crate::debug_log!("✅ [MUTATION] Mutation succeeded: {}", mutation.id());
+
+                        if is_optimistic && !optimistic_updates_for_rollback.is_empty() {
+                            // Update optimistic caches with real result
+                            let optimistic_keys: HashSet<String> = optimistic_updates_for_rollback
+                                .iter()
+                                .map(|(key, _)| key.clone())
+                                .collect();
+
+                            crate::debug_log!(
+                                "📦 [MUTATION] Updating {} optimistic cache entries with mutation result",
+                                optimistic_keys.len()
+                            );
+
+                            for cache_key in &optimistic_keys {
+                                cache.set(cache_key.clone(), Ok::<_, M::Error>(result.clone()));
+                                refresh_registry.trigger_refresh(cache_key);
+                            }
+
+                            let invalidation_keys: Vec<_> = cache_keys_to_check
+                                .iter()
+                                .filter(|key| !optimistic_keys.contains(*key))
+                                .cloned()
+                                .collect();
+
+                            if !invalidation_keys.is_empty() {
+                                crate::debug_log!(
+                                    "🔄 [MUTATION] Invalidating {} cache keys: {:?}",
+                                    invalidation_keys.len(),
+                                    invalidation_keys
+                                );
+
+                                for cache_key in invalidation_keys {
+                                    cache.invalidate(&cache_key);
+                                    refresh_registry.trigger_refresh(&cache_key);
+                                }
+                            }
+                        } else {
+                            // Standard cache invalidation
+                            crate::debug_log!(
+                                "🔄 [MUTATION] Invalidating {} cache keys: {:?}",
+                                cache_keys_to_check.len(),
+                                cache_keys_to_check
+                            );
+
+                            for cache_key in &cache_keys_to_check {
+                                crate::debug_log!(
+                                    "🗑️ [MUTATION] Invalidating cache key: {}",
+                                    cache_key
+                                );
+                                cache.invalidate(cache_key);
+                                refresh_registry.trigger_refresh(cache_key);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        crate::debug_log!("❌ [MUTATION] Mutation failed: {}", mutation.id());
+
+                        if is_optimistic && !optimistic_updates_for_rollback.is_empty() {
+                            crate::debug_log!(
+                                "🔄 [ROLLBACK] Rolling back {} optimistic updates",
+                                optimistic_updates_for_rollback.len()
+                            );
+
+                            for (cache_key, _) in &optimistic_updates_for_rollback {
+                                crate::debug_log!(
+                                    "🔄 [ROLLBACK] Rolling back optimistic update for cache key: {}",
+                                    cache_key
+                                );
+                                cache.invalidate(cache_key);
+                                refresh_registry.trigger_refresh(cache_key);
+                            }
+                        }
+                    }
+                }
+
+                if result_tx.send(mutation_result).is_err() {
+                    crate::debug_log!(
+                        "⚠️ [MUTATION] Result receiver dropped before completion for: {}",
+                        mutation.id()
+                    );
+                }
+
+                // Reset the flag to allow new mutations
+                mutation_in_progress_for_cleanup.store(false, Ordering::Release);
+            });
+        }
+    };
+
+    (state, mutate_fn)
+}
+
+/// Core mutation logic shared between use_mutation and use_optimistic_mutation (non-WASM version)
+#[cfg(not(target_family = "wasm"))]
 fn mutation_core<M, Input>(
     mutation: M,
     config: MutationConfig,
@@ -640,6 +900,23 @@ where
 ///     }
 /// }
 /// ```
+/// Hook to create a mutation that can be triggered manually (WASM version)
+#[cfg(target_family = "wasm")]
+pub fn use_mutation<M, Input>(mutation: M) -> MutationHookResult<M, Input, impl Fn(Input) + Clone>
+where
+    M: Mutation<Input> + 'static,
+    Input: Clone + PartialEq + 'static,
+{
+    let config = if mutation.has_optimistic() {
+        MutationConfig::optimistic()
+    } else {
+        MutationConfig::default()
+    };
+    mutation_core(mutation, config)
+}
+
+/// Hook to create a mutation that can be triggered manually (non-WASM version)
+#[cfg(not(target_family = "wasm"))]
 pub fn use_mutation<M, Input>(mutation: M) -> MutationHookResult<M, Input, impl Fn(Input) + Clone>
 where
     M: Mutation<Input> + Send + Sync + 'static,
@@ -690,6 +967,21 @@ where
 ///     }
 /// }
 /// ```
+/// Hook to create a mutation with optimistic updates (WASM version)
+#[cfg(target_family = "wasm")]
+pub fn use_optimistic_mutation<M, Input>(
+    mutation: M,
+) -> MutationHookResult<M, Input, impl Fn(Input) + Clone>
+where
+    M: Mutation<Input> + 'static,
+    Input: Clone + PartialEq + 'static,
+{
+    // Simply delegate to use_mutation, which auto-detects optimistic updates
+    use_mutation(mutation)
+}
+
+/// Hook to create a mutation with optimistic updates (non-WASM version)
+#[cfg(not(target_family = "wasm"))]
 pub fn use_optimistic_mutation<M, Input>(
     mutation: M,
 ) -> MutationHookResult<M, Input, impl Fn(Input) + Clone>
