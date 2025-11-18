@@ -107,13 +107,18 @@ where
     /// Get a unique identifier for this provider instance with the given parameters
     ///
     /// This ID is used for caching and invalidation. The default implementation
-    /// hashes the provider's type and parameters to generate a unique ID.
+    /// hashes the provider's type, parameter type, and parameter value to generate a unique ID.
+    /// This ensures that different parameter types with the same value produce different keys.
     fn id(&self, param: &Param) -> String {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
         let mut hasher = DefaultHasher::new();
+        // Hash provider type
         std::any::TypeId::of::<Self>().hash(&mut hasher);
+        // Hash parameter type to prevent collisions between different types with same value
+        std::any::TypeId::of::<Param>().hash(&mut hasher);
+        // Hash parameter value
         param.hash(&mut hasher);
         format!("{:x}", hasher.finish())
     }
@@ -391,9 +396,28 @@ where
     // SWR staleness checking - runs on every render to check for stale data
     check_and_handle_swr_core(&provider, &param, &cache_key, &cache, &refresh_registry);
 
+    // Track previous cache key for cleanup
+    let mut prev_cache_key = use_signal(|| String::new());
+
     // Use memo with reactive dependencies to track changes automatically
     let _execution_memo = use_memo(use_reactive!(|(provider, param)| {
         let cache_key = provider.id(&param);
+        
+        // Clean up previous cache key's tasks if it changed
+        let prev_key = prev_cache_key.read().clone();
+        if !prev_key.is_empty() && prev_key != cache_key {
+            refresh_registry.stop_interval_task(&prev_key);
+            refresh_registry.stop_periodic_task(&prev_key, crate::refresh::TaskType::CacheExpiration);
+            refresh_registry.stop_periodic_task(&prev_key, crate::refresh::TaskType::StaleCheck);
+            
+            let cleanup_key = format!("{prev_key}_cleanup");
+            refresh_registry.stop_periodic_task(&cleanup_key, crate::refresh::TaskType::CacheCleanup);
+            
+            crate::debug_log!("🧹 [CLEANUP] Stopped all tasks for previous cache key: {}", prev_key);
+        }
+        
+        // Update tracked cache key
+        prev_cache_key.set(cache_key.clone());
 
         #[cfg(feature = "tracing")]
         crate::debug_log!(

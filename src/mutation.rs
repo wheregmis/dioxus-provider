@@ -14,7 +14,12 @@
 
 use dioxus::prelude::*;
 use futures::channel::oneshot;
-use std::{collections::HashSet, future::Future};
+use std::{
+    collections::HashSet,
+    future::Future,
+    sync::atomic::{AtomicBool, Ordering},
+    sync::Arc,
+};
 
 use crate::{
     global::{get_global_cache, get_global_refresh_registry},
@@ -312,6 +317,17 @@ struct MutationConfig {
     optimistic: bool,
 }
 
+/// Guard to ensure mutation flag is reset even if mutation panics
+struct MutationCleanupGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl Drop for MutationCleanupGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::Release);
+    }
+}
+
 impl MutationConfig {
     /// Create a default mutation configuration (no optimistic updates)
     fn default() -> Self {
@@ -334,6 +350,8 @@ where
     Input: Clone + PartialEq + Send + Sync + 'static,
 {
     let state = use_signal(|| MutationState::Idle);
+    // Use an atomic flag to prevent concurrent mutations and race conditions
+    let mutation_in_progress: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let cache = get_global_cache();
     let refresh_registry = get_global_refresh_registry();
 
@@ -350,12 +368,33 @@ where
             })
             .clone();
         let is_optimistic = config.optimistic;
+        let mutation_in_progress = mutation_in_progress.clone();
 
         move |input: Input| {
-            // Prevent concurrent optimistic mutations
-            if is_optimistic && matches!(*state.read(), MutationState::Loading) {
+            // Prevent concurrent mutations using atomic compare-and-swap
+            // This ensures only one mutation runs at a time, preventing race conditions
+            let was_in_progress = mutation_in_progress.compare_exchange(
+                false,
+                true,
+                Ordering::Acquire,
+                Ordering::Relaxed,
+            );
+            
+            if was_in_progress.is_err() {
+                // Another mutation is already in progress
                 crate::debug_log!(
                     "⏸️ [MUTATION] Skipping mutation - already in progress for: {}",
+                    mutation.id()
+                );
+                return;
+            }
+
+            // Double-check state to prevent race conditions
+            if matches!(*state.read(), MutationState::Loading) {
+                // Reset the flag since we're not proceeding
+                mutation_in_progress.store(false, Ordering::Release);
+                crate::debug_log!(
+                    "⏸️ [MUTATION] Skipping mutation - state is Loading for: {}",
                     mutation.id()
                 );
                 return;
@@ -366,8 +405,9 @@ where
             let refresh_registry = refresh_registry.clone();
             let input = input.clone();
             let mut ui_state = state;
+            let mutation_in_progress_for_cleanup = mutation_in_progress.clone();
 
-            // Set loading state
+            // Set loading state atomically
             ui_state.set(MutationState::Loading);
 
             // Collect optimistic updates if enabled
@@ -429,6 +469,11 @@ where
             });
 
             dioxus_core::spawn_forever(async move {
+                // Ensure flag is reset even if mutation panics
+                let _cleanup_guard = MutationCleanupGuard {
+                    flag: mutation_in_progress_for_cleanup.clone(),
+                };
+
                 #[cfg(feature = "tracing")]
                 let mutation_type = if is_optimistic {
                     "optimistic mutation"
@@ -543,6 +588,9 @@ where
                         mutation.id()
                     );
                 }
+
+                // Reset the flag to allow new mutations
+                mutation_in_progress_for_cleanup.store(false, Ordering::Release);
             });
         }
     };
