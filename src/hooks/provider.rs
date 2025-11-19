@@ -35,7 +35,7 @@ use std::{fmt::Debug, future::Future, time::Duration};
 use crate::{
     cache::ProviderCache,
     global::{get_global_runtime, get_global_runtime_handles},
-    runtime::{request::handle_cache_miss, ProviderRuntime, ProviderRuntimeHandles},
+    runtime::{ProviderRuntime, ProviderRuntimeHandles, request::handle_cache_miss},
 };
 
 use crate::param_utils::IntoProviderParam;
@@ -438,17 +438,13 @@ where
                 Ok(data) => {
                     // Only update state if it's different to avoid unnecessary re-renders
                     if !matches!(*state.read(), State::Success(ref d) if d == &data) {
-                        let _ = spawn(async move {
-                            state.set(State::Success(data));
-                        });
+                        state.set(State::Success(data));
                     }
                 }
                 Err(error) => {
                     // Only update state if it's different to avoid unnecessary re-renders
                     if !matches!(*state.read(), State::Error(ref e) if e == &error) {
-                        let _ = spawn(async move {
-                            state.set(State::Error(error));
-                        });
+                        state.set(State::Error(error));
                     }
                 }
             }
