@@ -50,10 +50,7 @@ pub mod prelude {
     };
 
     // Error types
-    pub use crate::errors::{
-        ApiError, ApiResult, DatabaseError, DatabaseResult, ProviderError, ProviderResult,
-        UserError, UserResult,
-    };
+    pub use crate::errors::ProviderError;
 
     // Parameter utilities for custom types
     pub use crate::param_utils::IntoProviderParam;

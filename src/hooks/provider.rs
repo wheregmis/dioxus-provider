@@ -37,7 +37,7 @@ use crate::{
     global::{get_global_runtime, get_global_runtime_handles},
     runtime::{
         ProviderLifecyclePolicy, ProviderRuntime, ProviderRuntimeHandles,
-        request::handle_cache_miss,
+        request::resolve_cache_or_fetch,
     },
 };
 
@@ -394,7 +394,7 @@ where
     P: Provider<Param> + Send + Clone,
     Param: ProviderParamBounds,
 {
-    let mut state = use_signal(|| State::Loading {
+    let state = use_signal(|| State::Loading {
         task: spawn(async {}),
     });
     let runtime = runtime_instance_or_panic();
@@ -446,30 +446,7 @@ where
         // - SWR staleness checking is handled by the periodic stale check task
         // - These periodic tasks run in the background without causing re-render loops
 
-        // Check cache for valid data
-        if let Some(cached_result) = cache.get::<Result<P::Output, P::Error>>(&cache_key) {
-            // Access tracking is automatically handled by cache.get() updating last_accessed time
-            // Removed verbose cache hit logging to reduce spam
-
-            match cached_result {
-                Ok(data) => {
-                    // Only update state if it's different to avoid unnecessary re-renders
-                    if !matches!(*state.read(), State::Success(ref d) if d == &data) {
-                        state.set(State::Success(data));
-                    }
-                }
-                Err(error) => {
-                    // Only update state if it's different to avoid unnecessary re-renders
-                    if !matches!(*state.read(), State::Error(ref e) if e == &error) {
-                        state.set(State::Error(error));
-                    }
-                }
-            }
-            return;
-        }
-
-        // Delegate cache miss orchestration to the runtime so hooks stay lean
-        handle_cache_miss(
+        resolve_cache_or_fetch(
             &runtime,
             provider.clone(),
             param.clone(),

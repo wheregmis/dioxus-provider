@@ -103,25 +103,18 @@ pub fn setup_cache_expiration_task_core<P, Param>(
     let check_interval = std::cmp::max(expiration / 4, MIN_TASK_INTERVAL);
 
     refresh_registry.start_periodic_task(
-            cache_key,
-            TaskType::CacheExpiration,
-            check_interval,
-            move || {
-                if let Ok(mut cache_lock) = cache_clone.cache.lock() {
-                    if let Some(entry) = cache_lock.get(&cache_key_clone) {
-                        if entry.is_expired(expiration) {
-                            crate::debug_log!(
-                                "🗑️ [AUTO-EXPIRATION] Cache expired for key: {} - triggering reactive refresh",
-                                cache_key_clone
-                            );
-                            cache_lock.remove(&cache_key_clone);
-                            drop(cache_lock);
-                            refresh_registry_clone.trigger_refresh(&cache_key_clone);
-                        }
-                    }
-                }
-            },
-        );
+        cache_key,
+        TaskType::CacheExpiration,
+        check_interval,
+        move || {
+            check_and_handle_cache_expiration(
+                Some(expiration),
+                &cache_key_clone,
+                &cache_clone,
+                &refresh_registry_clone,
+            );
+        },
+    );
 }
 
 #[cfg(target_family = "wasm")]
@@ -143,25 +136,18 @@ pub fn setup_cache_expiration_task_core<P, Param>(
     let check_interval = std::cmp::max(expiration / 4, MIN_TASK_INTERVAL);
 
     refresh_registry.start_periodic_task(
-            cache_key,
-            TaskType::CacheExpiration,
-            check_interval,
-            move || {
-                if let Ok(mut cache_lock) = cache_clone.cache.lock() {
-                    if let Some(entry) = cache_lock.get(&cache_key_clone) {
-                        if entry.is_expired(expiration) {
-                            crate::debug_log!(
-                                "🗑️ [AUTO-EXPIRATION] Cache expired for key: {} - triggering reactive refresh",
-                                cache_key_clone
-                            );
-                            cache_lock.remove(&cache_key_clone);
-                            drop(cache_lock);
-                            refresh_registry_clone.trigger_refresh(&cache_key_clone);
-                        }
-                    }
-                }
-            },
-        );
+        cache_key,
+        TaskType::CacheExpiration,
+        check_interval,
+        move || {
+            check_and_handle_cache_expiration(
+                Some(expiration),
+                &cache_key_clone,
+                &cache_clone,
+                &refresh_registry_clone,
+            );
+        },
+    );
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -252,5 +238,79 @@ pub fn check_and_handle_cache_expiration(
         if should_trigger_refresh {
             refresh_registry.trigger_refresh(cache_key);
         }
+    }
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+    use super::*;
+    use crate::{cache::ProviderCache, refresh::RefreshRegistry};
+    use std::future::Future;
+    use tokio::time::sleep;
+
+    fn block_on<F: Future<Output = ()>>(future: F) {
+        tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(future);
+    }
+
+    #[test]
+    fn removes_expired_entries_and_triggers_refresh() {
+        block_on(async {
+            let cache = ProviderCache::new();
+            let refresh_registry = RefreshRegistry::new();
+            let cache_key = "ttl-expired";
+            cache.set(cache_key.to_string(), Ok::<u32, ()>(1));
+
+            sleep(Duration::from_millis(30)).await;
+
+            check_and_handle_cache_expiration(
+                Some(Duration::from_millis(10)),
+                cache_key,
+                &cache,
+                &refresh_registry,
+            );
+
+            assert!(
+                cache
+                    .get::<Result<u32, ()>>(cache_key)
+                    .is_none(),
+                "expired entries should be removed from cache"
+            );
+            assert_eq!(
+                refresh_registry.get_refresh_count(cache_key),
+                1,
+                "removing expired data should trigger a refresh"
+            );
+        });
+    }
+
+    #[test]
+    fn keeps_fresh_entries_without_refresh() {
+        block_on(async {
+            let cache = ProviderCache::new();
+            let refresh_registry = RefreshRegistry::new();
+            let cache_key = "ttl-fresh";
+            cache.set(cache_key.to_string(), Ok::<u32, ()>(5));
+
+            sleep(Duration::from_millis(5)).await;
+
+            check_and_handle_cache_expiration(
+                Some(Duration::from_millis(50)),
+                cache_key,
+                &cache,
+                &refresh_registry,
+            );
+
+            let cached = cache
+                .get::<Result<u32, ()>>(cache_key)
+                .expect("entry should still exist");
+            assert_eq!(cached, Ok(5));
+            assert_eq!(
+                refresh_registry.get_refresh_count(cache_key),
+                0,
+                "no refresh should fire when TTL not reached"
+            );
+        });
     }
 }

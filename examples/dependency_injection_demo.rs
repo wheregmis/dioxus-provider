@@ -24,7 +24,7 @@ impl ApiClient {
         }
     }
 
-    async fn fetch_user(&self, id: u32) -> Result<User, String> {
+    async fn fetch_user(&self, id: u32) -> Result<User, ProviderError> {
         // Simulate API call
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         Ok(User {
@@ -34,7 +34,7 @@ impl ApiClient {
         })
     }
 
-    async fn fetch_posts(&self, user_id: u32) -> Result<Vec<Post>, String> {
+    async fn fetch_posts(&self, user_id: u32) -> Result<Vec<Post>, ProviderError> {
         // Simulate API call
         tokio::time::sleep(std::time::Duration::from_millis(150)).await;
         Ok(vec![
@@ -64,7 +64,7 @@ impl Database {
         Self { connection_string }
     }
 
-    async fn log_access(&self, user_id: u32, resource: &str) -> Result<(), String> {
+    async fn log_access(&self, user_id: u32, resource: &str) -> Result<(), ProviderError> {
         // Simulate database write
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         println!("DB LOG: User {user_id} accessed {resource}");
@@ -91,7 +91,7 @@ pub struct Post {
 // Macro-based dependency injection providers (clean and simple!)
 
 #[provider]
-async fn fetch_user(user_id: u32) -> Result<User, String> {
+async fn fetch_user(user_id: u32) -> Result<User, ProviderError> {
     println!("fetch_user called with user_id: {user_id}");
 
     // Dependencies are automatically injected via the inject() function
@@ -106,7 +106,7 @@ async fn fetch_user(user_id: u32) -> Result<User, String> {
 }
 
 #[provider]
-async fn fetch_user_posts(user_id: u32) -> Result<Vec<Post>, String> {
+async fn fetch_user_posts(user_id: u32) -> Result<Vec<Post>, ProviderError> {
     println!("fetch_user_posts called with user_id: {user_id}");
 
     let api_client = inject::<ApiClient>()?;
@@ -120,7 +120,7 @@ async fn fetch_user_posts(user_id: u32) -> Result<Vec<Post>, String> {
 }
 
 #[provider(cache_expiration = "30s")]
-async fn fetch_user_with_cache(user_id: u32) -> Result<User, String> {
+async fn fetch_user_with_cache(user_id: u32) -> Result<User, ProviderError> {
     println!("fetch_user_with_cache called with user_id: {user_id}");
 
     let api_client = inject::<ApiClient>()?;
@@ -134,7 +134,7 @@ async fn fetch_user_with_cache(user_id: u32) -> Result<User, String> {
 }
 
 #[provider(stale_time = "10s")]
-async fn fetch_fresh_posts(user_id: u32) -> Result<Vec<Post>, String> {
+async fn fetch_fresh_posts(user_id: u32) -> Result<Vec<Post>, ProviderError> {
     println!("fetch_fresh_posts called with user_id: {user_id}");
 
     let api_client = inject::<ApiClient>()?;
@@ -322,7 +322,7 @@ fn App() -> Element {
 }
 
 /// Initialize all dependencies
-fn init_dependencies() -> Result<(), String> {
+fn init_dependencies() -> Result<(), ProviderError> {
     // Note: Dependency injection is initialized via dioxus_provider::init() in main()
 
     // Register API client if not already registered

@@ -27,11 +27,36 @@
 - **Flexible Composition**: Compose any subset of providers based on your specific needs.
 - **Error Aggregation**: Intelligent error handling across composed providers with proper error propagation.
 
-### Structured Error Handling ✨ NEW!
-- **Rich Error Types**: Comprehensive error hierarchy with `ProviderError`, `UserError`, `ApiError`, and `DatabaseError`.
+### Structured Error Handling
+
+`dioxus-provider` no longer ships domain-specific errors. Instead, define your own domain enums (with `thiserror`) and use them in providers. For example:
+
+```rust,ignore
+use dioxus_provider::prelude::*;
+use thiserror::Error;
+
+#[derive(Clone, Debug, PartialEq)]
+struct UserProfile;
+
+#[derive(Error, Debug, Clone, PartialEq)]
+pub enum UserError {
+    #[error("User not found: {id}")]
+    NotFound { id: u32 },
+    #[error("User is suspended: {reason}")]
+    Suspended { reason: String },
+}
+
+#[provider]
+async fn fetch_user_profile(user_id: u32) -> Result<UserProfile, UserError> {
+    // ...
+    Ok(UserProfile)
+}
+```
+
+- **Bring Your Own Domain Errors**: Model failures with custom enums (via `thiserror`) that fit your backends.
+- **ProviderError for Framework Issues**: Use the built-in `ProviderError` only when reporting configuration/DI/cache failures.
 - **Actionable Error Messages**: Context-rich error information for better debugging and user feedback.
-- **Error Chaining**: Automatic error conversion and chaining using `#[from]` attributes.
-- **Backward Compatibility**: Seamless integration with existing String-based error handling.
+- **String Compatibility**: Seamless integration with existing String-based error handling.
 
 ### Mutation System
 - **Manual Implementation Pattern**: Define data mutations using simple struct implementations.
@@ -59,15 +84,15 @@ dioxus-provider = "0.0.1" # Replace with the latest version
 
 ### 1. Initialize Global Providers
 
-At the entry point of your application, call `init_global_providers()` once. This sets up the global cache that all providers will use.
+At the entry point of your application, call `init()` once. This sets up the global cache, refresh registry, and optional dependency injection.
 
 ```rust,no_run
-use dioxus_provider::global::init_global_providers;
+use dioxus_provider::global::init;
 use dioxus::prelude::*;
 
 fn main() {
     // This is required for all provider hooks to work
-    init_global_providers();
+    init().unwrap();
     launch(app);
 }
 
@@ -244,39 +269,7 @@ async fn fetch_complete_profile(user_id: u32) -> Result<UserProfile, ProviderErr
 
 ### Structured Error Handling
 
-Rich, actionable error types for better error handling:
-
-```rust,ignore
-use dioxus_provider::prelude::*;
-
-#[derive(Clone, PartialEq)]
-struct User { is_suspended: bool }
-
-impl User {
-    fn is_suspended(&self) -> bool { self.is_suspended }
-}
-
-#[derive(thiserror::Error, Debug, Clone, PartialEq)]
-pub enum UserError {
-    #[error("Validation failed: {field} - {reason}")]
-    ValidationFailed { field: String, reason: String },
-    #[error("User is suspended: {reason}")]
-    Suspended { reason: String },
-    #[error("User not found: {id}")]
-    NotFound { id: u32 },
-}
-
-#[provider]
-async fn fetch_user_data(id: u32) -> Result<User, UserError> {
-    if id == 0 {
-        return Err(UserError::ValidationFailed {
-            field: "id".to_string(),
-            reason: "ID cannot be zero".to_string(),
-        });
-    }
-    Ok(User { is_suspended: false })
-}
-```
+Define your own domain-specific error types (e.g., with `thiserror`) and use them in providers. See the earlier section for a complete example; built-in `ApiError`/`DatabaseError` types have been removed to keep the core library lean.
 
 ## Advanced Usage
 
@@ -424,8 +417,8 @@ Explore the full power of `dioxus-provider` with these real-world, ready-to-run 
 | [`comprehensive_demo.rs`](./examples/comprehensive_demo.rs) | **All-in-one showcase**: Demonstrates lifecycle controls (interval refresh, SWR, cache expiration), global providers, error handling, parameterized providers, and more. |
 | [`composable_provider_demo.rs`](./examples/composable_provider_demo.rs) | **Composable Providers**: Parallel provider execution, type-safe result composition, and error aggregation. |
 | [`dependency_injection_demo.rs`](./examples/dependency_injection_demo.rs) | **Dependency Injection**: Macro-based DI for API clients, databases, and more. |
-| [`structured_errors_demo.rs`](./examples/structured_errors_demo.rs) | **Structured Error Handling**: Rich error types, actionable messages, and error chaining. |
-| [`counter_mutation_demo.rs`](./examples/counter_mutation_demo.rs) | **Mutations**: Counter with provider invalidation and mutation state tracking. |
+| [`todo_app.rs`](./examples/todo_app.rs) | **Mutations**: End-to-end todo list with invalidation and cache-aware mutations. |
+| [`optimistic_minimal.rs`](./examples/optimistic_minimal.rs) | **Optimistic Mutations (Experimental)**: Tiny example showing optimistic updates and rollback. |
 | [`cache_expiration_test.rs`](./examples/cache_expiration_test.rs) | **Cache Expiration Test**: Verifies that cache expiration triggers loading and refetch. |
 | [`suspense_demo.rs`](./examples/suspense_demo.rs) | **Suspense Integration**: Shows how to use Dioxus SuspenseBoundary with async providers. |
 | [`provider_state_combinators.rs`](./examples/provider_state_combinators.rs) | **ProviderState Combinators**: Practical use of `.map`, `.map_err`, and `.and_then` for ergonomic state transformations in UI. |

@@ -10,12 +10,38 @@ use crate::{
 /// State handle abstraction so runtime logic can be tested without real Dioxus signals.
 pub trait RuntimeStateHandle<T, E>: Clone {
     fn set_state(&mut self, new_state: State<T, E>);
+    fn set_state_if_changed(&mut self, new_state: State<T, E>) {
+        self.set_state(new_state);
+    }
     fn is_loading(&self) -> bool;
 }
 
-impl<T: Clone + 'static, E: Clone + 'static> RuntimeStateHandle<T, E> for Signal<State<T, E>> {
+impl<T: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> RuntimeStateHandle<T, E>
+    for Signal<State<T, E>>
+{
     fn set_state(&mut self, new_state: State<T, E>) {
         self.set(new_state);
+    }
+
+    fn set_state_if_changed(&mut self, new_state: State<T, E>) {
+        let should_update = {
+            let current = self.read();
+            match (&*current, &new_state) {
+                (State::Success(existing), State::Success(next)) => existing != next,
+                (State::Error(existing), State::Error(next)) => existing != next,
+                (State::Loading { .. }, State::Loading { .. }) => true,
+                (State::Success(_), State::Error(_))
+                | (State::Success(_), State::Loading { .. })
+                | (State::Error(_), State::Success(_))
+                | (State::Error(_), State::Loading { .. })
+                | (State::Loading { .. }, State::Success(_))
+                | (State::Loading { .. }, State::Error(_)) => true,
+            }
+        };
+
+        if should_update {
+            self.set(new_state);
+        }
     }
 
     fn is_loading(&self) -> bool {
@@ -140,6 +166,40 @@ pub fn handle_cache_miss<P, Param, Handle>(
     state_for_loading.set_state(State::Loading { task });
 }
 
+/// Resolve the current state from cache or kick off the request pipeline.
+pub fn resolve_cache_or_fetch<P, Param, Handle>(
+    runtime: &ProviderRuntime,
+    provider: P,
+    param: Param,
+    cache: ProviderCache,
+    refresh_registry: RefreshRegistry,
+    cache_key: String,
+    state: Handle,
+) where
+    P: Provider<Param> + Send + Clone,
+    Param: ProviderParamBounds,
+    Handle: RuntimeStateHandle<P::Output, P::Error> + 'static,
+{
+    if let Some(cached_result) = cache.get::<Result<P::Output, P::Error>>(&cache_key) {
+        let mut state_handle = state;
+        match cached_result {
+            Ok(data) => state_handle.set_state_if_changed(State::Success(data)),
+            Err(error) => state_handle.set_state_if_changed(State::Error(error)),
+        }
+        return;
+    }
+
+    handle_cache_miss(
+        runtime,
+        provider,
+        param,
+        cache,
+        refresh_registry,
+        cache_key,
+        state,
+    );
+}
+
 #[cfg(all(test, not(target_family = "wasm")))]
 mod tests {
     use super::*;
@@ -208,6 +268,10 @@ mod tests {
         fn entered_loading_after_success(&self) -> bool {
             self.loading_after_success.load(Ordering::SeqCst)
         }
+
+        fn is_loading_now(&self) -> bool {
+            self.is_loading.load(Ordering::SeqCst)
+        }
     }
 
     impl<T, E> RuntimeStateHandle<T, E> for TestStateHandle {
@@ -265,6 +329,112 @@ mod tests {
         tokio::runtime::Runtime::new()
             .expect("tokio runtime")
             .block_on(future);
+    }
+
+    #[test]
+    fn dedupes_inflight_requests_and_marks_waiters_loading() {
+        block_on(async {
+            let mut harness = DioxusRuntimeHarness::new();
+            let runtime = ProviderRuntime::new(ProviderRuntimeConfig::new());
+            let handles = runtime.handles();
+            let (provider, calls) = CountingProvider::new();
+            let cache_key = "dedupe-key".to_string();
+
+            let first_handle = TestStateHandle::default();
+            let second_handle = TestStateHandle::default();
+
+            harness.run(|| {
+                handle_cache_miss(
+                    &runtime,
+                    provider.clone(),
+                    (),
+                    handles.cache.clone(),
+                    handles.refresh_registry.clone(),
+                    cache_key.clone(),
+                    first_handle.clone(),
+                );
+            });
+            harness.run(|| {
+                handle_cache_miss(
+                    &runtime,
+                    provider.clone(),
+                    (),
+                    handles.cache.clone(),
+                    handles.refresh_registry.clone(),
+                    cache_key.clone(),
+                    second_handle.clone(),
+                );
+            });
+            harness.pump();
+
+            assert!(
+                first_handle.is_loading_now() && second_handle.is_loading_now(),
+                "all waiters should enter loading while deduping"
+            );
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "deduped requests should only trigger a single provider run"
+            );
+
+            sleep(Duration::from_millis(30)).await;
+            harness.pump();
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                1,
+                "inflight dedupe should not trigger extra runs"
+            );
+        });
+    }
+
+    #[test]
+    fn allows_new_request_after_completion() {
+        block_on(async {
+            let mut harness = DioxusRuntimeHarness::new();
+            let runtime = ProviderRuntime::new(ProviderRuntimeConfig::new());
+            let handles = runtime.handles();
+            let (provider, calls) = CountingProvider::new();
+            let cache_key = "dedupe-key-2".to_string();
+
+            let handle = TestStateHandle::default();
+            harness.run(|| {
+                handle_cache_miss(
+                    &runtime,
+                    provider.clone(),
+                    (),
+                    handles.cache.clone(),
+                    handles.refresh_registry.clone(),
+                    cache_key.clone(),
+                    handle.clone(),
+                );
+            });
+            harness.pump();
+            sleep(Duration::from_millis(30)).await;
+            harness.pump();
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+            let follow_up_handle = TestStateHandle::default();
+            harness.run(|| {
+                handle_cache_miss(
+                    &runtime,
+                    provider.clone(),
+                    (),
+                    handles.cache.clone(),
+                    handles.refresh_registry.clone(),
+                    cache_key.clone(),
+                    follow_up_handle.clone(),
+                );
+            });
+            harness.pump();
+            sleep(Duration::from_millis(30)).await;
+            harness.pump();
+
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                2,
+                "once prior request completes the next call should start a new run"
+            );
+        });
     }
 
     #[test]
