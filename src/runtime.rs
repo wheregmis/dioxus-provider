@@ -7,6 +7,12 @@ pub mod request;
 pub mod swr;
 pub mod tasks;
 
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
 use crate::{
     cache::ProviderCache,
     hooks::Provider,
@@ -44,6 +50,34 @@ impl ProviderRuntimeConfig {
 }
 
 impl Default for ProviderRuntimeConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Lifecycle policy attached to every provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderLifecyclePolicy {
+    pub interval: Option<Duration>,
+    pub cache_expiration: Option<Duration>,
+    pub stale_time: Option<Duration>,
+}
+
+impl ProviderLifecyclePolicy {
+    pub fn new() -> Self {
+        Self {
+            interval: None,
+            cache_expiration: None,
+            stale_time: None,
+        }
+    }
+
+    pub fn is_noop(&self) -> bool {
+        self.interval.is_none() && self.cache_expiration.is_none() && self.stale_time.is_none()
+    }
+}
+
+impl Default for ProviderLifecyclePolicy {
     fn default() -> Self {
         Self::new()
     }
@@ -148,33 +182,49 @@ impl ProviderRuntime {
         P: Provider<Param> + Clone + Send,
         Param: ProviderParamBounds,
     {
-        setup_intelligent_cache_management(
-            provider,
-            cache_key,
-            &self.cache,
-            &self.refresh_registry,
-        );
-        setup_cache_expiration_task_core(
-            provider,
-            param,
-            cache_key,
-            &self.cache,
-            &self.refresh_registry,
-        );
-        setup_interval_task_core(
-            provider,
-            param,
-            cache_key,
-            &self.cache,
-            &self.refresh_registry,
-        );
-        setup_stale_check_task_core(
-            provider,
-            param,
-            cache_key,
-            &self.cache,
-            &self.refresh_registry,
-        );
+        let policy = provider.lifecycle();
+        if policy.is_noop() {
+            return;
+        }
+
+        if let Some(expiration) = policy.cache_expiration {
+            setup_intelligent_cache_management(
+                expiration,
+                cache_key,
+                &self.cache,
+                &self.refresh_registry,
+            );
+            setup_cache_expiration_task_core(
+                provider,
+                param,
+                cache_key,
+                &self.cache,
+                &self.refresh_registry,
+                expiration,
+            );
+        }
+
+        if let Some(interval) = policy.interval {
+            setup_interval_task_core(
+                provider,
+                param,
+                cache_key,
+                &self.cache,
+                &self.refresh_registry,
+                interval,
+            );
+        }
+
+        if let Some(stale) = policy.stale_time {
+            setup_stale_check_task_core(
+                provider,
+                param,
+                cache_key,
+                &self.cache,
+                &self.refresh_registry,
+                stale,
+            );
+        }
     }
 
     /// Ensure scheduled tasks are registered for a provider key (WASM targets).
@@ -184,36 +234,48 @@ impl ProviderRuntime {
         P: Provider<Param> + Clone,
         Param: ProviderParamBounds,
     {
-        setup_intelligent_cache_management(
-            provider,
-            cache_key,
-            &self.cache,
-            &self.refresh_registry,
-        );
-        setup_cache_expiration_task_core(
-            provider,
-            param,
-            cache_key,
-            &self.cache,
-            &self.refresh_registry,
-        );
-        setup_interval_task_core(
-            provider,
-            param,
-            cache_key,
-            &self.cache,
-            &self.refresh_registry,
-        );
-        setup_stale_check_task_core(
-            provider,
-            param,
-            cache_key,
-            &self.cache,
-            &self.refresh_registry,
-        );
+        let policy = provider.lifecycle();
+        if policy.is_noop() {
+            return;
+        }
+
+        if let Some(expiration) = policy.cache_expiration {
+            setup_intelligent_cache_management(
+                expiration,
+                cache_key,
+                &self.cache,
+                &self.refresh_registry,
+            );
+            setup_cache_expiration_task_core(
+                provider,
+                param,
+                cache_key,
+                &self.cache,
+                &self.refresh_registry,
+                expiration,
+            );
+        }
+
+        if let Some(interval) = policy.interval {
+            setup_interval_task_core(
+                provider,
+                param,
+                cache_key,
+                &self.cache,
+                &self.refresh_registry,
+                interval,
+            );
+        }
+
+        if let Some(stale) = policy.stale_time {
+            setup_stale_check_task_core(
+                provider,
+                param,
+                cache_key,
+                &self.cache,
+                &self.refresh_registry,
+                stale,
+            );
+        }
     }
 }
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};

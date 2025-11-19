@@ -179,7 +179,7 @@ cargo test --doc             # Run doc tests
 Run any example with context (shows cache behavior, SWR revalidation, etc.):
 ```bash
 cargo run --example todo_app
-cargo run --example swr_demo
+cargo run --example comprehensive_demo
 cargo run --example dependency_injection_demo
 ```
 

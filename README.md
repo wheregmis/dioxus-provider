@@ -381,6 +381,23 @@ fn App() -> Element {
 }
 ```
 
+
+### Provider Lifecycle Controls
+
+You can fine-tune cache behaviour per provider using lifecycle controls:
+
+```rust,ignore
+#[provider(lifecycle(interval = "4s", stale_time = "6s", cache_expiration = "30s"))]
+async fn fetch_dashboard(user_id: u32) -> Result<UserDashboard, Error> {
+    // ...
+}
+```
+
+If omitted, no background tasks run – providers simply fetch when requested. Combine interval polling, SWR, and TTL as needed.
+
+For example implementations, see `examples/comprehensive_demo.rs`, which configures interval refresh, SWR, and cache expiration on different providers.
+
+
 ## State Combinators
 
 `State` now supports combinator methods for ergonomic state transformations:
@@ -404,10 +421,7 @@ Explore the full power of `dioxus-provider` with these real-world, ready-to-run 
 
 | Example | Description |
 |---------|-------------|
-| [`comprehensive_demo.rs`](./examples/comprehensive_demo.rs) | **All-in-one showcase**: Demonstrates global providers, interval refresh, SWR, cache expiration, error handling, parameterized providers, and more. |
-| [`cache_expiration_demo.rs`](./examples/cache_expiration_demo.rs) | **Cache Expiration**: Shows how data is evicted and re-fetched after TTL, with manual invalidation and cache hit/miss indicators. |
-| [`swr_demo.rs`](./examples/swr_demo.rs) | **Stale-While-Revalidate (SWR)**: Instant data serving from cache, background revalidation, and manual refresh. |
-| [`interval_refresh_demo.rs`](./examples/interval_refresh_demo.rs) | **Interval Refresh**: Automatic background data updates at configurable intervals. |
+| [`comprehensive_demo.rs`](./examples/comprehensive_demo.rs) | **All-in-one showcase**: Demonstrates lifecycle controls (interval refresh, SWR, cache expiration), global providers, error handling, parameterized providers, and more. |
 | [`composable_provider_demo.rs`](./examples/composable_provider_demo.rs) | **Composable Providers**: Parallel provider execution, type-safe result composition, and error aggregation. |
 | [`dependency_injection_demo.rs`](./examples/dependency_injection_demo.rs) | **Dependency Injection**: Macro-based DI for API clients, databases, and more. |
 | [`structured_errors_demo.rs`](./examples/structured_errors_demo.rs) | **Structured Error Handling**: Rich error types, actionable messages, and error chaining. |
@@ -419,7 +433,7 @@ Explore the full power of `dioxus-provider` with these real-world, ready-to-run 
 > **Tip:**
 > Run any example with  
 > `cargo run --example <example_name>`  
-> (e.g., `cargo run --example swr_demo`)
+> (e.g., `cargo run --example comprehensive_demo`)
 
 ## Ecosystem & Alternatives
 

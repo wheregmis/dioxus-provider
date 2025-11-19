@@ -35,7 +35,10 @@ use std::{fmt::Debug, future::Future, time::Duration};
 use crate::{
     cache::ProviderCache,
     global::{get_global_runtime, get_global_runtime_handles},
-    runtime::{ProviderRuntime, ProviderRuntimeHandles, request::handle_cache_miss},
+    runtime::{
+        ProviderLifecyclePolicy, ProviderRuntime, ProviderRuntimeHandles,
+        request::handle_cache_miss,
+    },
 };
 
 use crate::param_utils::IntoProviderParam;
@@ -136,6 +139,15 @@ where
     /// trigger a background revalidation while still serving the stale data to the UI.
     fn stale_time(&self) -> Option<Duration> {
         None
+    }
+
+    /// Aggregate lifecycle controls for this provider. Override to customize scheduling.
+    fn lifecycle(&self) -> ProviderLifecyclePolicy {
+        ProviderLifecyclePolicy {
+            interval: self.interval(),
+            cache_expiration: self.cache_expiration(),
+            stale_time: self.stale_time(),
+        }
     }
 }
 
