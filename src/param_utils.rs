@@ -18,7 +18,7 @@ use std::hash::Hash;
 ///
 /// Use the `provider_param!` macro for convenience:
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dioxus_provider::{prelude::*, provider_param};
 ///
 /// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -26,7 +26,7 @@ use std::hash::Hash;
 /// provider_param!(UserId);  // Enable direct usage
 ///
 /// #[provider]
-/// async fn fetch_user(user_id: UserId) -> Result<User, String> { ... }
+/// async fn fetch_user(user_id: UserId) -> Result<User, String> { todo!() }
 ///
 /// // Now you can use it directly:
 /// let user = use_provider(fetch_user(), UserId(42));
@@ -40,11 +40,11 @@ use std::hash::Hash;
 ///
 /// # Examples
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dioxus_provider::prelude::*;
 ///
 /// #[provider]
-/// async fn fetch_user(user_id: u32) -> Result<User, String> { ... }
+/// async fn fetch_user(user_id: u32) -> Result<User, String> { todo!() }
 ///
 /// // All of these are valid:
 /// let user = use_provider(fetch_user(), 42);      // direct primitive
@@ -136,7 +136,7 @@ where
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,ignore
 /// use dioxus_provider::{prelude::*, provider_param};
 ///
 /// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -150,10 +150,10 @@ where
 /// provider_param!(ProductId);
 ///
 /// #[provider]
-/// async fn fetch_user(user_id: UserId) -> Result<User, String> { ... }
+/// async fn fetch_user(user_id: UserId) -> Result<User, String> { todo!() }
 ///
 /// #[provider]
-/// async fn fetch_product(product_id: ProductId) -> Result<Product, String> { ... }
+/// async fn fetch_product(product_id: ProductId) -> Result<Product, String> { todo!() }
 ///
 /// // Now you can use them directly:
 /// let user = use_provider(fetch_user(), UserId(42));

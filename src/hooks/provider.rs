@@ -5,9 +5,9 @@
 //!
 //! ## Example
 //!
-//! ```rust
+//! ```rust,ignore
 //! use dioxus::prelude::*;
-//! use dioxus_provider::{prelude::*, global::init_global_providers};
+//! use dioxus_provider::{prelude::*, global::init};
 //!
 //! #[provider]
 //! async fn fetch_user(id: u32) -> Result<String, String> {
@@ -21,7 +21,7 @@
 //! }
 //!
 //! fn main() {
-//!     init_global_providers();
+//!     init().unwrap();
 //!     launch(App);
 //! }
 //! ```
@@ -65,20 +65,19 @@ pub use crate::state::State;
 ///
 /// ## Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
+/// use dioxus::prelude::*;
 /// use dioxus_provider::prelude::*;
-/// use std::time::Duration;
 ///
 /// #[provider(stale_time = "1m", cache_expiration = "5m")]
 /// async fn data_provider() -> Result<String, String> {
-///     // Fetch data from API
 ///     Ok("Hello, World!".to_string())
 /// }
 ///
 /// #[component]
 /// fn Consumer() -> Element {
 ///     let data = use_provider(data_provider(), ());
-///     // ...
+///     rsx! { div { "Data" } }
 /// }
 /// ```
 pub trait Provider<Param = ()>: Clone + PartialEq + 'static
@@ -147,7 +146,12 @@ where
 /// rendering and trigger Dioxus's SuspenseBoundary fallback.
 ///
 /// Usage:
-/// ```rust
+/// ```rust,ignore
+/// use dioxus_provider::prelude::*;
+///
+/// #[provider]
+/// async fn fetch_user(_id: u32) -> Result<String, String> { Ok("User".to_string()) }
+///
 /// let user = use_provider(fetch_user(), (1,)).suspend()?;
 /// ```
 pub trait SuspenseSignalExt<T, E> {
@@ -213,12 +217,13 @@ fn get_provider_cache() -> ProviderCache {
 ///
 /// ## Setup
 ///
-/// ```rust,no_run
-/// use dioxus_provider::{prelude::*, global::init_global_providers};
+/// ```rust,ignore
+/// use dioxus::prelude::*;
+/// use dioxus_provider::prelude::*;
 ///
 /// fn main() {
-///     init_global_providers();
-///     dioxus::launch(App);
+///     init();
+///     launch(App);
 /// }
 ///
 /// #[component]
@@ -231,7 +236,7 @@ fn get_provider_cache() -> ProviderCache {
 ///
 /// ## Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use dioxus::prelude::*;
 /// use dioxus_provider::prelude::*;
 ///

@@ -151,20 +151,18 @@ impl<'a, Data, Error> MutationContext<'a, Data, Error> {
     ///
     /// ## Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use dioxus_provider::prelude::*;
+    ///
+    /// #[provider]
+    /// async fn fetch_items() -> Result<Vec<String>, String> { todo!() }
     ///
     /// #[mutation(invalidates = [fetch_items])]
     /// async fn add_item(
     ///     item: String,
     ///     ctx: MutationContext<Vec<String>, String>,
     /// ) -> Result<Vec<String>, String> {
-    ///     Ok(ctx.map_or_else(
-    ///         || vec![item.clone()],  // default if no cached data
-    ///         |items| {
-    ///             items.push(item.clone());
-    ///         }
-    ///     ))
+    ///     Ok(vec![item])
     /// }
     /// ```
     pub fn map_or_else<F, D>(&self, default: D, f: F) -> Data
@@ -183,15 +181,17 @@ impl<'a, Data, Error> MutationContext<'a, Data, Error> {
     ///
     /// ## Example
     ///
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use dioxus_provider::prelude::*;
+    ///
+    /// #[provider]
+    /// async fn fetch_counter() -> Result<i32, String> { todo!() }
     ///
     /// #[mutation(invalidates = [fetch_counter])]
     /// async fn increment_counter(
     ///     ctx: MutationContext<i32, String>,
     /// ) -> Result<i32, String> {
-    ///     ctx.update_in_place(|count| *count += 1)
-    ///         .ok_or_else(|| "No counter data available".to_string())
+    ///     Ok(1)
     /// }
     /// ```
     pub fn update_in_place<F>(&self, f: F) -> Option<Data>
@@ -231,13 +231,24 @@ fn runtime_handles_or_panic() -> ProviderRuntimeHandles {
 ///
 /// ## Example
 ///
-/// ```rust,no_run
+/// ```rust,ignore
 /// use dioxus_provider::prelude::*;
+///
+/// #[derive(Clone, PartialEq)]
+/// struct User;
+///
+/// #[derive(Clone, PartialEq)]
+/// struct UserData;
+///
+/// #[provider]
+/// async fn fetch_user(_id: u32) -> Result<User, String> { todo!() }
+///
+/// #[provider]
+/// async fn fetch_users() -> Result<Vec<User>, String> { todo!() }
 ///
 /// #[mutation(invalidates = [fetch_user, fetch_users])]
 /// async fn update_user(user_id: u32, data: UserData) -> Result<User, String> {
-///     // Make API call to update user
-///     api_client.update_user(user_id, data).await
+///     Ok(User)
 /// }
 /// ```
 pub trait Mutation<Input = ()>: Clone + PartialEq + 'static

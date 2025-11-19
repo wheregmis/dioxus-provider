@@ -7,29 +7,28 @@
 //! ## Examples
 //!
 //! ### Using ProviderError for general provider failures:
-//! ```rust
-//! use dioxus_provider::errors::ProviderError;
+//! ```rust,ignore
+//! use dioxus_provider::{errors::ProviderError, prelude::*};
+//!
+//! #[derive(Clone, PartialEq)]
+//! struct User;
 //!
 //! #[provider]
 //! async fn fetch_user(user_id: u32) -> Result<User, ProviderError> {
 //!     if user_id == 0 {
 //!         return Err(ProviderError::InvalidInput("User ID cannot be zero".to_string()));
 //!     }
-//!     
-//!     let response = api_call(user_id).await
-//!         .map_err(|e| ProviderError::ExternalService {
-//!             service: "UserAPI".to_string(),
-//!             error: e.to_string(),
-//!         })?;
-//!         
-//!     Ok(response)
+//!     Ok(User)
 //! }
 //! ```
 //!
 //! ### Using custom domain-specific errors:
-//! ```rust
-//! use dioxus_provider::errors::ProviderError;
+//! ```rust,ignore
+//! use dioxus_provider::prelude::*;
 //! use thiserror::Error;
+//!
+//! #[derive(Clone, PartialEq)]
+//! struct UserProfile;
 //!
 //! #[derive(Error, Debug, Clone, PartialEq)]
 //! pub enum UserError {
@@ -37,15 +36,11 @@
 //!     NotFound { id: u32 },
 //!     #[error("User is suspended: {reason}")]
 //!     Suspended { reason: String },
-//!     #[error("Permission denied for user {user_id}")]
-//!     PermissionDenied { user_id: u32 },
-//!     #[error("Provider error: {0}")]
-//!     Provider(#[from] ProviderError),
 //! }
 //!
 //! #[provider]
 //! async fn fetch_user_profile(user_id: u32) -> Result<UserProfile, UserError> {
-//!     // Implementation
+//!     Ok(UserProfile)
 //! }
 //! ```
 

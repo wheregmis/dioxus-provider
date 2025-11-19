@@ -198,9 +198,12 @@ mod tests {
         }
     }
 
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_dependency_injection() {
-        init_dependency_injection();
+        let _guard = TEST_MUTEX.lock().unwrap();
+        ensure_dependency_injection_initialized();
 
         // Clear any existing dependencies
         clear_dependencies().unwrap();
@@ -220,7 +223,8 @@ mod tests {
 
     #[test]
     fn test_duplicate_registration() {
-        init_dependency_injection();
+        let _guard = TEST_MUTEX.lock().unwrap();
+        ensure_dependency_injection_initialized();
         clear_dependencies().unwrap();
 
         let service1 = TestService::new("first".to_string());
@@ -235,7 +239,8 @@ mod tests {
 
     #[test]
     fn test_missing_dependency() {
-        init_dependency_injection();
+        let _guard = TEST_MUTEX.lock().unwrap();
+        ensure_dependency_injection_initialized();
         clear_dependencies().unwrap();
 
         // Try to inject non-existent dependency

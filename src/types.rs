@@ -65,7 +65,7 @@ impl<T> ProviderParamBounds for T where
 ///
 /// // Custom types need to derive Clone and PartialEq:
 /// #[derive(Clone, PartialEq)]
-/// struct User {
+/// pub struct User {
 ///     id: u32,
 ///     name: String,
 /// }

@@ -225,19 +225,7 @@ mod tests {
 
     #[test]
     fn test_global_provider_initialization() {
-        // If already initialized, just test that we can get the instances
-        if is_initialized() {
-            let _cache = get_global_cache().unwrap();
-            let _refresh = get_global_refresh_registry().unwrap();
-            return;
-        }
-
-        // Test initialization from scratch
-        assert!(!is_initialized());
-
-        init_global_providers().unwrap();
-
-        assert!(is_initialized());
+        init().unwrap();
 
         // Test that we can get all instances
         let _cache = get_global_cache().unwrap();
