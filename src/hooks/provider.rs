@@ -34,19 +34,12 @@ use std::{fmt::Debug, future::Future, time::Duration};
 
 use crate::{
     cache::ProviderCache,
-    global::{get_global_cache, get_global_refresh_registry},
-    refresh::RefreshRegistry,
+    global::{get_global_runtime, get_global_runtime_handles},
+    runtime::{request::handle_cache_miss, ProviderRuntime, ProviderRuntimeHandles},
 };
 
 use crate::param_utils::IntoProviderParam;
 use crate::types::{ProviderErrorBounds, ProviderOutputBounds, ProviderParamBounds};
-
-// Import helper functions from internal modules
-use super::internal::cache_mgmt::setup_intelligent_cache_management;
-use super::internal::tasks::{
-    setup_cache_expiration_task_core, setup_interval_task_core,
-    setup_stale_check_task_core,
-};
 
 pub use crate::state::State;
 
@@ -188,22 +181,25 @@ impl<T: Clone + 'static, E: Clone + 'static> SuspenseSignalExt<T, E> for Signal<
     }
 }
 
-/// Get the provider cache - requires global providers to be initialized
-fn get_provider_cache() -> ProviderCache {
-    get_global_cache()
+fn runtime_handles_or_panic() -> ProviderRuntimeHandles {
+    get_global_runtime_handles().unwrap_or_else(|_| {
+        panic!(
+            "Global providers not initialized. Call dioxus_provider::init() before using providers."
+        )
+    })
+}
+
+fn runtime_instance_or_panic() -> ProviderRuntime {
+    get_global_runtime()
         .unwrap_or_else(|_| {
             panic!("Global providers not initialized. Call dioxus_provider::init() before using providers.")
         })
         .clone()
 }
 
-/// Get the refresh registry - requires global providers to be initialized
-fn get_refresh_registry() -> RefreshRegistry {
-    get_global_refresh_registry()
-        .unwrap_or_else(|_| {
-            panic!("Global providers not initialized. Call dioxus_provider::init() before using providers.")
-        })
-        .clone()
+/// Get the provider cache - requires global providers to be initialized
+fn get_provider_cache() -> ProviderCache {
+    runtime_handles_or_panic().cache
 }
 
 /// Hook to access the provider cache for manual cache management
@@ -291,8 +287,10 @@ where
     P: Provider<Param>,
     Param: ProviderParamBounds,
 {
-    let cache = get_provider_cache();
-    let refresh_registry = get_refresh_registry();
+    let runtime = runtime_instance_or_panic();
+    let runtime_handles = runtime.handles();
+    let cache = runtime_handles.cache;
+    let refresh_registry = runtime_handles.refresh_registry;
     let cache_key = provider.id(&param);
 
     move || {
@@ -327,8 +325,10 @@ where
 /// }
 /// ```
 pub fn use_clear_provider_cache() -> impl Fn() + Clone {
-    let cache = get_provider_cache();
-    let refresh_registry = get_refresh_registry();
+    let runtime = runtime_instance_or_panic();
+    let runtime_handles = runtime.handles();
+    let cache = runtime_handles.cache;
+    let refresh_registry = runtime_handles.refresh_registry;
 
     move || {
         cache.clear();
@@ -380,37 +380,41 @@ where
     let mut state = use_signal(|| State::Loading {
         task: spawn(async {}),
     });
-    let cache = get_provider_cache();
-    let refresh_registry = get_refresh_registry();
+    let runtime = runtime_instance_or_panic();
+    let runtime_handles = runtime.handles();
+    let cache = runtime_handles.cache;
+    let refresh_registry = runtime_handles.refresh_registry;
 
     // Track previous cache key for cleanup
     let mut prev_cache_key = use_signal(|| String::new());
 
     // Use memo with reactive dependencies to track changes automatically
+    let runtime_for_memo = runtime.clone();
+    let cache_for_memo = cache.clone();
+    let refresh_for_memo = refresh_registry.clone();
+
     let _execution_memo = use_memo(use_reactive!(|(provider, param)| {
+        let runtime = runtime_for_memo.clone();
+        let cache = cache_for_memo.clone();
+        let refresh_registry = refresh_for_memo.clone();
         let cache_key = provider.id(&param);
-        
+
         // Clean up previous cache key's tasks if it changed
         let prev_key = prev_cache_key.read().clone();
         if prev_key != cache_key {
             if !prev_key.is_empty() {
-                refresh_registry.stop_interval_task(&prev_key);
-                refresh_registry.stop_periodic_task(&prev_key, crate::refresh::TaskType::CacheExpiration);
-                refresh_registry.stop_periodic_task(&prev_key, crate::refresh::TaskType::StaleCheck);
-                
-                let cleanup_key = format!("{prev_key}_cleanup");
-                refresh_registry.stop_periodic_task(&cleanup_key, crate::refresh::TaskType::CacheCleanup);
-                
-                crate::debug_log!("🧹 [CLEANUP] Stopped all tasks for previous cache key: {}", prev_key);
+                runtime.stop_provider_tasks(&prev_key);
+                crate::debug_log!(
+                    "🧹 [CLEANUP] Stopped all tasks for previous cache key: {}",
+                    prev_key
+                );
             }
-            
+
             // Only update tracked cache key if it actually changed to avoid unnecessary re-renders
             prev_cache_key.set(cache_key.clone());
         }
 
-        // Setup intelligent cache management (replaces old auto-dispose system)
-        // Only set up once per cache key to avoid duplicate tasks
-        setup_intelligent_cache_management(&provider, &cache_key, &cache, &refresh_registry);
+        runtime.ensure_provider_tasks(&provider, &param, &cache_key);
 
         // Subscribe to refresh events for this cache key if we have a reactive context
         if let Some(reactive_context) = ReactiveContext::current() {
@@ -419,16 +423,6 @@ where
 
         // Read the current refresh count (this makes the memo reactive to changes)
         let _current_refresh_count = refresh_registry.get_refresh_count(&cache_key);
-
-        // Set up cache expiration monitoring task (idempotent - won't create duplicates)
-        setup_cache_expiration_task_core(&provider, &param, &cache_key, &cache, &refresh_registry);
-
-        // Set up interval task if provider has interval configured (idempotent)
-        setup_interval_task_core(&provider, &param, &cache_key, &cache, &refresh_registry);
-
-        // Set up stale check task if provider has stale time configured (idempotent)
-        // The stale check task will handle periodic SWR revalidation in the background
-        setup_stale_check_task_core(&provider, &param, &cache_key, &cache, &refresh_registry);
 
         // Note: We don't check expiration or SWR here to avoid loops
         // - Cache expiration is handled by the periodic cache expiration task
@@ -461,119 +455,16 @@ where
             return;
         }
 
-        // Cache miss - check if a request is already pending (request deduplication)
-        let is_new_request = cache.mark_request_pending(&cache_key);
-        
-        if !is_new_request {
-            // Request is already pending - another component is fetching this data
-            // Subscribe to refresh events and wait for the shared request to complete
-            // Only log periodically to avoid spam (every 100th component or power of 2)
-            #[cfg(feature = "tracing")]
-            {
-                let pending_count = cache.pending_request_count(&cache_key);
-                // Log only at powers of 2 or every 100th increment to reduce spam
-                if pending_count == 1 
-                    || pending_count == 2 
-                    || pending_count == 4 
-                    || pending_count == 8 
-                    || pending_count == 16 
-                    || pending_count == 100 
-                    || pending_count == 200 
-                    || pending_count == 500 
-                    || pending_count % 1000 == 0
-                {
-                    crate::debug_log!(
-                        "🔄 [REQUEST-DEDUP] Request already pending for key: {} ({} components waiting)",
-                        cache_key,
-                        pending_count
-                    );
-                }
-            }
-            
-            // Set loading state and wait for the shared request to complete
-            // The refresh will be triggered when the pending request completes, which will
-            // cause this memo to re-run and find the cached data
-            // Note: The component is already subscribed to refresh events above, so it will
-            // be notified when the shared request completes
-            // Only set loading if not already loading to avoid re-render loops
-            if !state.read().is_loading() {
-                state.set(State::Loading {
-                    task: spawn(async {}), // Dummy task - we're waiting for the shared request
-                });
-            }
-            return;
-        }
-
-        // This is a new request - we're the first component to request this data
-        crate::debug_log!("🆕 [REQUEST-DEDUP] Starting new request for key: {}", cache_key);
-
-        // Cache miss - check if this is due to invalidation and we should use SWR behavior
-        let is_invalidation_refresh = refresh_registry.get_refresh_count(&cache_key) > 0;
-
-        if is_invalidation_refresh {
-            // This is an invalidation refresh - use SWR behavior to prevent jitters
-            // Don't show loading state immediately, let SWR handle background revalidation
-            crate::debug_log!(
-                "🔄 [INVALIDATION] Cache miss due to invalidation for: {}, using SWR behavior",
-                cache_key
-            );
-
-            // Set up background revalidation without showing loading state
-            let cache_clone = cache.clone();
-            let cache_key_clone = cache_key.clone();
-            let provider = provider.clone();
-            let param = param.clone();
-            let refresh_registry_clone = refresh_registry.clone();
-
-            spawn(async move {
-                let result = provider.run(param).await;
-                let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
-                if updated {
-                    refresh_registry_clone.trigger_refresh(&cache_key_clone);
-                    crate::debug_log!(
-                        "✅ [INVALIDATION] Background revalidation completed for: {}",
-                        cache_key_clone
-                    );
-                }
-                // Mark request as complete
-                cache_clone.mark_request_complete(&cache_key_clone);
-            });
-
-            // Don't set loading state - let the component handle the absence of data gracefully
-            return;
-        }
-
-        // Regular cache miss - set loading and spawn async task
-        let cache_clone = cache.clone();
-        let cache_key_clone = cache_key.clone();
-        let provider = provider.clone();
-        let param = param.clone();
-        let refresh_registry_clone = refresh_registry.clone();
-        let mut state_for_async = state;
-
-        // Spawn the real async task and store the handle in Loading
-        let task = spawn(async move {
-            let result = provider.run(param).await;
-            let updated = cache_clone.set(cache_key_clone.clone(), result.clone());
-            crate::debug_log!(
-                "📊 [CACHE-STORE] Attempted to store new data for: {} (updated: {})",
-                cache_key_clone,
-                updated
-            );
-            if updated {
-                // Only update state and trigger rerender if value changed
-                match result {
-                    Ok(data) => state_for_async.set(State::Success(data)),
-                    Err(error) => state_for_async.set(State::Error(error)),
-                }
-            }
-            // Mark request as complete - this will notify all waiting components via refresh
-            cache_clone.mark_request_complete(&cache_key_clone);
-            // Trigger refresh to notify all components waiting for this request
-            // This will cause their memos to re-run and find the cached data
-            refresh_registry_clone.trigger_refresh(&cache_key_clone);
-        });
-        state.set(State::Loading { task });
+        // Delegate cache miss orchestration to the runtime so hooks stay lean
+        handle_cache_miss(
+            &runtime,
+            provider.clone(),
+            param.clone(),
+            cache.clone(),
+            refresh_registry.clone(),
+            cache_key.clone(),
+            state.clone(),
+        );
     }));
 
     state

@@ -1,8 +1,5 @@
 //! Provider hooks and utilities for Dioxus applications
 
-// Internal helper modules
-mod internal;
-
 // Main hooks implementation
 mod provider;
 

@@ -5,7 +5,11 @@
 
 use std::sync::OnceLock;
 
-use crate::{cache::ProviderCache, refresh::RefreshRegistry};
+use crate::{
+    cache::ProviderCache,
+    refresh::RefreshRegistry,
+    runtime::{ProviderRuntime, ProviderRuntimeConfig, ProviderRuntimeHandles},
+};
 
 /// Error type for global provider operations
 #[derive(Debug, thiserror::Error)]
@@ -16,16 +20,21 @@ pub enum GlobalProviderError {
     InitializationFailed(String),
 }
 
-/// Global singleton instance of the provider cache
-static GLOBAL_CACHE: OnceLock<ProviderCache> = OnceLock::new();
-
-/// Global singleton instance of the refresh registry
-static GLOBAL_REFRESH_REGISTRY: OnceLock<RefreshRegistry> = OnceLock::new();
+/// Global singleton instance of the provider runtime
+static GLOBAL_RUNTIME: OnceLock<ProviderRuntime> = OnceLock::new();
 
 /// Configuration for initializing the global provider system
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ProviderConfig {
-    enable_dependency_injection: bool,
+    runtime_config: ProviderRuntimeConfig,
+}
+
+impl Default for ProviderConfig {
+    fn default() -> Self {
+        Self {
+            runtime_config: ProviderRuntimeConfig::new(),
+        }
+    }
 }
 
 impl ProviderConfig {
@@ -36,22 +45,14 @@ impl ProviderConfig {
 
     /// Enable dependency injection support
     pub fn with_dependency_injection(mut self) -> Self {
-        self.enable_dependency_injection = true;
+        self.runtime_config = self.runtime_config.clone().with_dependency_injection();
         self
     }
 
     /// Initialize the global provider system with this configuration
     pub fn init(self) -> Result<(), GlobalProviderError> {
-        // Initialize cache first
-        GLOBAL_CACHE.get_or_init(ProviderCache::new);
-
-        // Initialize refresh registry
-        let _refresh_registry = GLOBAL_REFRESH_REGISTRY.get_or_init(RefreshRegistry::new);
-
-        // Initialize dependency injection if enabled
-        if self.enable_dependency_injection {
-            crate::injection::ensure_dependency_injection_initialized();
-        }
+        let runtime_config = self.runtime_config.clone();
+        GLOBAL_RUNTIME.get_or_init(|| ProviderRuntime::new(runtime_config));
 
         Ok(())
     }
@@ -132,8 +133,9 @@ pub fn init_global_providers() -> Result<(), GlobalProviderError> {
 ///
 /// Returns `GlobalProviderError::NotInitialized` if `init_global_providers()` has not been called yet.
 pub fn get_global_cache() -> Result<&'static ProviderCache, GlobalProviderError> {
-    GLOBAL_CACHE
+    GLOBAL_RUNTIME
         .get()
+        .map(|runtime| runtime.cache())
         .ok_or(GlobalProviderError::NotInitialized)
 }
 
@@ -146,14 +148,27 @@ pub fn get_global_cache() -> Result<&'static ProviderCache, GlobalProviderError>
 ///
 /// Returns `GlobalProviderError::NotInitialized` if `init_global_providers()` has not been called yet.
 pub fn get_global_refresh_registry() -> Result<&'static RefreshRegistry, GlobalProviderError> {
-    GLOBAL_REFRESH_REGISTRY
+    GLOBAL_RUNTIME
+        .get()
+        .map(|runtime| runtime.refresh_registry())
+        .ok_or(GlobalProviderError::NotInitialized)
+}
+
+/// Access the global runtime handle.
+pub fn get_global_runtime() -> Result<&'static ProviderRuntime, GlobalProviderError> {
+    GLOBAL_RUNTIME
         .get()
         .ok_or(GlobalProviderError::NotInitialized)
 }
 
+/// Clone handles to the global runtime for use in hooks and mutations.
+pub fn get_global_runtime_handles() -> Result<ProviderRuntimeHandles, GlobalProviderError> {
+    get_global_runtime().map(|runtime| runtime.handles())
+}
+
 /// Check if global providers have been initialized
 pub fn is_initialized() -> bool {
-    GLOBAL_CACHE.get().is_some() && GLOBAL_REFRESH_REGISTRY.get().is_some()
+    GLOBAL_RUNTIME.get().is_some()
 }
 
 /// Ensure that global providers have been initialized

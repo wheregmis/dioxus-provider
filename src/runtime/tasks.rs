@@ -1,22 +1,19 @@
-//! Task management for provider background operations
+//! Task management for provider background operations.
 
 use dioxus::prelude::*;
 use std::time::Duration;
 
-
 use crate::{
     cache::ProviderCache,
+    hooks::Provider,
     refresh::{RefreshRegistry, TaskType},
+    runtime::swr::check_and_handle_swr_core,
     types::ProviderParamBounds,
 };
 
-use super::super::Provider;
-use super::swr::check_and_handle_swr_core;
-
-/// Minimum interval for periodic tasks to prevent busy spinning
+/// Minimum interval for periodic tasks to prevent busy spinning.
 const MIN_TASK_INTERVAL: Duration = Duration::from_millis(1);
 
-/// Sets up interval refresh task for a provider
 #[cfg(not(target_family = "wasm"))]
 pub fn setup_interval_task_core<P, Param>(
     provider: &P,
@@ -36,7 +33,6 @@ pub fn setup_interval_task_core<P, Param>(
         let refresh_registry_clone = refresh_registry.clone();
 
         refresh_registry.start_interval_task(cache_key, interval, move || {
-            // Re-execute the provider and update cache in background
             let cache_for_task = cache_clone.clone();
             let provider_for_task = provider_clone.clone();
             let param_for_task = param_clone.clone();
@@ -46,7 +42,6 @@ pub fn setup_interval_task_core<P, Param>(
             spawn(async move {
                 let result = provider_for_task.run(param_for_task).await;
                 let updated = cache_for_task.set(cache_key_for_task.clone(), result);
-                // Only trigger refresh if value changed
                 if updated {
                     refresh_registry_for_task.trigger_refresh(&cache_key_for_task);
                 }
@@ -55,7 +50,6 @@ pub fn setup_interval_task_core<P, Param>(
     }
 }
 
-/// Sets up interval refresh task for a provider (WASM version)
 #[cfg(target_family = "wasm")]
 pub fn setup_interval_task_core<P, Param>(
     provider: &P,
@@ -75,7 +69,6 @@ pub fn setup_interval_task_core<P, Param>(
         let refresh_registry_clone = refresh_registry.clone();
 
         refresh_registry.start_interval_task(cache_key, interval, move || {
-            // Re-execute the provider and update cache in background
             let cache_for_task = cache_clone.clone();
             let provider_for_task = provider_clone.clone();
             let param_for_task = param_clone.clone();
@@ -85,7 +78,6 @@ pub fn setup_interval_task_core<P, Param>(
             spawn(async move {
                 let result = provider_for_task.run(param_for_task).await;
                 let updated = cache_for_task.set(cache_key_for_task.clone(), result);
-                // Only trigger refresh if value changed
                 if updated {
                     refresh_registry_for_task.trigger_refresh(&cache_key_for_task);
                 }
@@ -94,7 +86,6 @@ pub fn setup_interval_task_core<P, Param>(
     }
 }
 
-/// Sets up automatic cache expiration monitoring for providers
 #[cfg(not(target_family = "wasm"))]
 pub fn setup_cache_expiration_task_core<P, Param>(
     provider: &P,
@@ -111,15 +102,13 @@ pub fn setup_cache_expiration_task_core<P, Param>(
         let cache_key_clone = cache_key.to_string();
         let refresh_registry_clone = refresh_registry.clone();
 
-        // Compute check interval as quarter of expiration time, but ensure minimum interval
         let check_interval = std::cmp::max(expiration / 4, MIN_TASK_INTERVAL);
 
         refresh_registry.start_periodic_task(
             cache_key,
             TaskType::CacheExpiration,
-            check_interval, // Check every quarter of the expiration time (min 1ms)
+            check_interval,
             move || {
-                // Check if cache entry has expired
                 if let Ok(mut cache_lock) = cache_clone.cache.lock() {
                     if let Some(entry) = cache_lock.get(&cache_key_clone) {
                         if entry.is_expired(expiration) {
@@ -128,9 +117,7 @@ pub fn setup_cache_expiration_task_core<P, Param>(
                                 cache_key_clone
                             );
                             cache_lock.remove(&cache_key_clone);
-                            drop(cache_lock); // Release lock before triggering refresh
-
-                            // Trigger refresh to mark all reactive contexts as dirty
+                            drop(cache_lock);
                             refresh_registry_clone.trigger_refresh(&cache_key_clone);
                         }
                     }
@@ -140,7 +127,6 @@ pub fn setup_cache_expiration_task_core<P, Param>(
     }
 }
 
-/// Sets up automatic cache expiration monitoring for providers (WASM version)
 #[cfg(target_family = "wasm")]
 pub fn setup_cache_expiration_task_core<P, Param>(
     provider: &P,
@@ -157,15 +143,13 @@ pub fn setup_cache_expiration_task_core<P, Param>(
         let cache_key_clone = cache_key.to_string();
         let refresh_registry_clone = refresh_registry.clone();
 
-        // Compute check interval as quarter of expiration time, but ensure minimum interval
         let check_interval = std::cmp::max(expiration / 4, MIN_TASK_INTERVAL);
 
         refresh_registry.start_periodic_task(
             cache_key,
             TaskType::CacheExpiration,
-            check_interval, // Check every quarter of the expiration time (min 1ms)
+            check_interval,
             move || {
-                // Check if cache entry has expired
                 if let Ok(mut cache_lock) = cache_clone.cache.lock() {
                     if let Some(entry) = cache_lock.get(&cache_key_clone) {
                         if entry.is_expired(expiration) {
@@ -174,9 +158,7 @@ pub fn setup_cache_expiration_task_core<P, Param>(
                                 cache_key_clone
                             );
                             cache_lock.remove(&cache_key_clone);
-                            drop(cache_lock); // Release lock before triggering refresh
-
-                            // Trigger refresh to mark all reactive contexts as dirty
+                            drop(cache_lock);
                             refresh_registry_clone.trigger_refresh(&cache_key_clone);
                         }
                     }
@@ -186,7 +168,6 @@ pub fn setup_cache_expiration_task_core<P, Param>(
     }
 }
 
-/// Sets up automatic stale-checking task for SWR providers
 #[cfg(not(target_family = "wasm"))]
 pub fn setup_stale_check_task_core<P, Param>(
     provider: &P,
@@ -206,7 +187,6 @@ pub fn setup_stale_check_task_core<P, Param>(
         let refresh_registry_clone = refresh_registry.clone();
 
         refresh_registry.start_stale_check_task(cache_key, stale_time, move || {
-            // Check if data is stale and trigger revalidation if needed
             check_and_handle_swr_core(
                 &provider_clone,
                 &param_clone,
@@ -218,7 +198,6 @@ pub fn setup_stale_check_task_core<P, Param>(
     }
 }
 
-/// Sets up automatic stale-checking task for SWR providers (WASM version)
 #[cfg(target_family = "wasm")]
 pub fn setup_stale_check_task_core<P, Param>(
     provider: &P,
@@ -238,7 +217,6 @@ pub fn setup_stale_check_task_core<P, Param>(
         let refresh_registry_clone = refresh_registry.clone();
 
         refresh_registry.start_stale_check_task(cache_key, stale_time, move || {
-            // Check if data is stale and trigger revalidation if needed
             check_and_handle_swr_core(
                 &provider_clone,
                 &param_clone,
@@ -250,7 +228,7 @@ pub fn setup_stale_check_task_core<P, Param>(
     }
 }
 
-/// Shared cache expiration logic
+#[allow(dead_code)]
 pub fn check_and_handle_cache_expiration(
     cache_expiration: Option<Duration>,
     cache_key: &str,
@@ -266,7 +244,7 @@ pub fn check_and_handle_cache_expiration(
                         cache_key
                     );
                     cache_lock.remove(cache_key);
-                    true // Mark that we need to trigger refresh after dropping the lock
+                    true
                 } else {
                     false
                 }
@@ -277,7 +255,6 @@ pub fn check_and_handle_cache_expiration(
             false
         };
 
-        // Trigger refresh after the lock has been dropped to prevent deadlocks
         if should_trigger_refresh {
             refresh_registry.trigger_refresh(cache_key);
         }

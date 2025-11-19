@@ -17,13 +17,12 @@ use futures::channel::oneshot;
 use std::{
     collections::HashSet,
     future::Future,
-    sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
+    sync::atomic::{AtomicBool, Ordering},
 };
 
 use crate::{
-    global::{get_global_cache, get_global_refresh_registry},
-    hooks::Provider,
+    global::get_global_runtime_handles, hooks::Provider, runtime::ProviderRuntimeHandles,
     types::ProviderParamBounds,
 };
 
@@ -214,6 +213,14 @@ impl<'a, Data, Error> MutationContext<'a, Data, Error> {
     }
 }
 
+fn runtime_handles_or_panic() -> ProviderRuntimeHandles {
+    get_global_runtime_handles().unwrap_or_else(|_| {
+        panic!(
+            "Global providers not initialized. Call dioxus_provider::init() before using mutations."
+        )
+    })
+}
+
 /// Trait for defining mutations - operations that modify data
 ///
 /// Mutations are similar to providers but are designed for data modification operations.
@@ -353,21 +360,14 @@ where
     let state = use_signal(|| MutationState::Idle);
     // Use an atomic flag to prevent concurrent mutations and race conditions
     let mutation_in_progress: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    let cache = get_global_cache();
-    let refresh_registry = get_global_refresh_registry();
+    let runtime_handles = runtime_handles_or_panic();
+    let cache = runtime_handles.cache;
+    let refresh_registry = runtime_handles.refresh_registry;
 
     let mutate_fn = {
         let mutation = mutation.clone();
-        let cache = cache
-            .unwrap_or_else(|_| {
-                panic!("Global providers not initialized. Call dioxus_provider::init() before using mutations.")
-            })
-            .clone();
-        let refresh_registry = refresh_registry
-            .unwrap_or_else(|_| {
-                panic!("Global providers not initialized. Call dioxus_provider::init() before using mutations.")
-            })
-            .clone();
+        let cache = cache.clone();
+        let refresh_registry = refresh_registry.clone();
         let is_optimistic = config.optimistic;
         let mutation_in_progress = mutation_in_progress.clone();
 
@@ -380,7 +380,7 @@ where
                 Ordering::Acquire,
                 Ordering::Relaxed,
             );
-            
+
             if was_in_progress.is_err() {
                 // Another mutation is already in progress
                 crate::debug_log!(
@@ -612,21 +612,14 @@ where
     let state = use_signal(|| MutationState::Idle);
     // Use an atomic flag to prevent concurrent mutations and race conditions
     let mutation_in_progress: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    let cache = get_global_cache();
-    let refresh_registry = get_global_refresh_registry();
+    let runtime_handles = runtime_handles_or_panic();
+    let cache = runtime_handles.cache;
+    let refresh_registry = runtime_handles.refresh_registry;
 
     let mutate_fn = {
         let mutation = mutation.clone();
-        let cache = cache
-            .unwrap_or_else(|_| {
-                panic!("Global providers not initialized. Call dioxus_provider::init() before using mutations.")
-            })
-            .clone();
-        let refresh_registry = refresh_registry
-            .unwrap_or_else(|_| {
-                panic!("Global providers not initialized. Call dioxus_provider::init() before using mutations.")
-            })
-            .clone();
+        let cache = cache.clone();
+        let refresh_registry = refresh_registry.clone();
         let is_optimistic = config.optimistic;
         let mutation_in_progress = mutation_in_progress.clone();
 
@@ -639,7 +632,7 @@ where
                 Ordering::Acquire,
                 Ordering::Relaxed,
             );
-            
+
             if was_in_progress.is_err() {
                 // Another mutation is already in progress
                 crate::debug_log!(

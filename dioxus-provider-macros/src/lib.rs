@@ -553,7 +553,7 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
 
     let (mutate_signature, mutate_body) = {
         let mut prelude = Vec::<TokenStream2>::new();
-        
+
         // Create MutationContext if needed in manual mode
         if !is_auto_apply {
             if let (Some(ctx_ident), Some(data_ty), Some(err_ty)) = (
@@ -575,7 +575,7 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
 
         let call_expr = quote! { Self::call(#(#call_args),*) };
         let body = quote! { async move { #(#prelude)* #call_expr.await } };
-        
+
         // Generate full function with cfg for Send bound
         let signature_with_body = match input_count {
             0 => quote! {
@@ -648,7 +648,7 @@ fn generate_mutation(input_fn: ItemFn, mutation_args: MutationArgs) -> Result<To
 
         let call_expr = quote! { Self::call(#(#call_args),*) };
         let body = quote! { async move { #(#prelude)* #call_expr.await } };
-        
+
         // Generate full function with cfg for Send bound
         let signature_with_body = match input_count {
             0 => quote! {
