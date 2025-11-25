@@ -30,6 +30,7 @@ dioxus = { version = "0.7.1", default-features = false, features = [
     "hooks",
     "signals",
 ] }
+dioxus-stores = "0.7.1"
 # dioxus-provider-macros = { version = "0.1.1" }
 dioxus-provider-macros = { version = "0.2.1", path = "./dioxus-provider-macros" }
 futures = "0.3"

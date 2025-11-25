@@ -154,6 +154,50 @@ pub fn has_dependency<T: Send + Sync + 'static>() -> bool {
         .unwrap_or(false)
 }
 
+/// Register a dependency only if it's not already registered.
+///
+/// This is a convenience function that combines `has_dependency` and `register_dependency`
+/// into a single call. It's useful for initialization code where you want to ensure
+/// a dependency exists without erroring if it was already registered.
+///
+/// # Example
+/// ```ignore
+/// fn init_dependencies() {
+///     // These won't error even if called multiple times
+///     ensure_dependency(ApiClient::new("https://api.example.com"));
+///     ensure_dependency(Database::new("postgresql://localhost/myapp"));
+/// }
+/// ```
+pub fn ensure_dependency<T: Send + Sync + 'static>(dependency: T) -> Result<(), ProviderError> {
+    if has_dependency::<T>() {
+        Ok(())
+    } else {
+        register_dependency(dependency)
+    }
+}
+
+/// Register a dependency, replacing any existing one of the same type.
+///
+/// Unlike `register_dependency`, this won't error if a dependency already exists.
+/// Instead, it will replace the existing dependency with the new one.
+pub fn replace_dependency<T: Send + Sync + 'static>(dependency: T) -> Result<(), ProviderError> {
+    let registry = DEPENDENCY_REGISTRY.get().ok_or_else(|| {
+        ProviderError::DependencyInjection(
+            "Dependency registry not initialized. Call init() first.".to_string(),
+        )
+    })?;
+    
+    let type_id = std::any::TypeId::of::<T>();
+    let mut deps = registry.dependencies.write().map_err(|_| {
+        ProviderError::DependencyInjection(
+            "Failed to acquire write lock on dependencies".to_string(),
+        )
+    })?;
+    
+    deps.insert(type_id, Arc::new(dependency));
+    Ok(())
+}
+
 /// Clear all dependencies (mainly for testing)
 pub fn clear_dependencies() -> Result<(), ProviderError> {
     let registry = DEPENDENCY_REGISTRY.get().ok_or_else(|| {

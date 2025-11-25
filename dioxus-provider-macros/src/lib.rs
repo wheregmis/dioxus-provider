@@ -798,7 +798,7 @@ fn generate_invalidation_impl(mutation_args: &MutationArgs) -> TokenStream2 {
             .iter()
             .map(|provider_fn| {
                 quote! {
-                    ::dioxus_provider::mutation::provider_cache_key_simple(#provider_fn())
+                    ::dioxus_provider::mutation::provider_cache_key(#provider_fn(), ())
                 }
             })
             .collect();

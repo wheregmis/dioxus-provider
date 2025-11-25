@@ -1,35 +1,8 @@
 //! State: Async state enum for dioxus-provider
 //!
-//! This module provides the `State` enum and the `AsyncState` trait for working
-//! with asynchronous operations in dioxus-provider.
+//! This module provides the `State` enum for working with asynchronous operations.
 
 use dioxus::core::Task;
-
-/// Common trait for async state types that represent loading, success, and error states
-///
-/// This trait provides a unified interface for working with different async state types
-/// in dioxus-provider, such as `State` and `MutationState`.
-pub trait AsyncState {
-    /// The type of successful data
-    type Data;
-    /// The type of error
-    type Error;
-
-    /// Returns true if the state is currently loading
-    fn is_loading(&self) -> bool;
-
-    /// Returns true if the state contains successful data
-    fn is_success(&self) -> bool;
-
-    /// Returns true if the state contains an error
-    fn is_error(&self) -> bool;
-
-    /// Returns the data if successful, None otherwise
-    fn data(&self) -> Option<&Self::Data>;
-
-    /// Returns the error if failed, None otherwise
-    fn error(&self) -> Option<&Self::Error>;
-}
 
 /// Represents the state of an async operation
 #[derive(Clone, PartialEq, Debug)]
@@ -42,61 +15,36 @@ pub enum State<T, E> {
     Error(E),
 }
 
-impl<T, E> AsyncState for State<T, E> {
-    type Data = T;
-    type Error = E;
-
-    fn is_loading(&self) -> bool {
+impl<T, E> State<T, E> {
+    /// Returns true if the state is currently loading
+    pub fn is_loading(&self) -> bool {
         matches!(self, State::Loading { task: _ })
     }
 
-    fn is_success(&self) -> bool {
+    /// Returns true if the state contains successful data
+    pub fn is_success(&self) -> bool {
         matches!(self, State::Success(_))
     }
 
-    fn is_error(&self) -> bool {
+    /// Returns true if the state contains an error
+    pub fn is_error(&self) -> bool {
         matches!(self, State::Error(_))
     }
 
-    fn data(&self) -> Option<&T> {
+    /// Returns the data if successful, None otherwise
+    pub fn data(&self) -> Option<&T> {
         match self {
             State::Success(data) => Some(data),
             _ => None,
         }
     }
 
-    fn error(&self) -> Option<&E> {
+    /// Returns the error if failed, None otherwise
+    pub fn error(&self) -> Option<&E> {
         match self {
             State::Error(error) => Some(error),
             _ => None,
         }
-    }
-}
-
-impl<T, E> State<T, E> {
-    /// Returns true if the state is currently loading
-    pub fn is_loading(&self) -> bool {
-        <Self as AsyncState>::is_loading(self)
-    }
-
-    /// Returns true if the state contains successful data
-    pub fn is_success(&self) -> bool {
-        <Self as AsyncState>::is_success(self)
-    }
-
-    /// Returns true if the state contains an error
-    pub fn is_error(&self) -> bool {
-        <Self as AsyncState>::is_error(self)
-    }
-
-    /// Returns the data if successful, None otherwise
-    pub fn data(&self) -> Option<&T> {
-        <Self as AsyncState>::data(self)
-    }
-
-    /// Returns the error if failed, None otherwise
-    pub fn error(&self) -> Option<&E> {
-        <Self as AsyncState>::error(self)
     }
 
     /// Maps a State<T, E> to State<U, E> by applying a function to the contained data if successful.
@@ -132,6 +80,104 @@ impl<T, E> State<T, E> {
             State::Success(data) => op(data),
             State::Error(e) => State::Error(e),
             State::Loading { task } => State::Loading { task },
+        }
+    }
+
+    /// Returns the contained success value or a provided default.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let count = state.unwrap_or(0);
+    /// ```
+    pub fn unwrap_or(self, default: T) -> T {
+        match self {
+            State::Success(data) => data,
+            _ => default,
+        }
+    }
+
+    /// Returns the contained success value or computes it from a closure.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let count = state.unwrap_or_else(|| expensive_default());
+    /// ```
+    pub fn unwrap_or_else<F>(self, f: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        match self {
+            State::Success(data) => data,
+            _ => f(),
+        }
+    }
+
+    /// Converts from State<T, E> to Option<T>, discarding loading and error states.
+    ///
+    /// # Example
+    /// ```ignore
+    /// if let Some(data) = state.ok() {
+    ///     // use data
+    /// }
+    /// ```
+    pub fn ok(self) -> Option<T> {
+        match self {
+            State::Success(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// Converts from State<T, E> to Result<T, E>, treating Loading as an error.
+    ///
+    /// Returns Err with the provided loading_error if state is Loading.
+    pub fn into_result(self, loading_error: E) -> Result<T, E> {
+        match self {
+            State::Success(data) => Ok(data),
+            State::Error(e) => Err(e),
+            State::Loading { .. } => Err(loading_error),
+        }
+    }
+
+    /// Returns true if the state has resolved (either Success or Error, not Loading).
+    pub fn is_resolved(&self) -> bool {
+        !self.is_loading()
+    }
+}
+
+impl<T: Clone, E> State<T, E> {
+    /// Returns a clone of the contained success value or a provided default.
+    ///
+    /// Unlike `unwrap_or`, this method takes `&self` and clones the data.
+    pub fn cloned_or(&self, default: T) -> T {
+        match self {
+            State::Success(data) => data.clone(),
+            _ => default,
+        }
+    }
+
+    /// Returns a clone of the contained success value or computes it from a closure.
+    pub fn cloned_or_else<F>(&self, f: F) -> T
+    where
+        F: FnOnce() -> T,
+    {
+        match self {
+            State::Success(data) => data.clone(),
+            _ => f(),
+        }
+    }
+}
+
+impl<T: Default, E> State<T, E> {
+    /// Returns the contained success value or a default.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let items: Vec<Item> = state.unwrap_or_default();
+    /// ```
+    pub fn unwrap_or_default(self) -> T {
+        match self {
+            State::Success(data) => data,
+            _ => T::default(),
         }
     }
 }

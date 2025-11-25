@@ -14,6 +14,22 @@ use crate::{
 /// Minimum interval for periodic tasks to prevent busy spinning.
 const MIN_TASK_INTERVAL: Duration = Duration::from_millis(1);
 
+// Interval task wrappers (platform-specific bounds) delegate to shared impl
+#[cfg(target_family = "wasm")]
+pub fn setup_interval_task_core<P, Param>(
+    provider: &P,
+    param: &Param,
+    cache_key: &str,
+    cache: &ProviderCache,
+    refresh_registry: &RefreshRegistry,
+    interval: Duration,
+) where
+    P: Provider<Param> + Clone,
+    Param: ProviderParamBounds,
+{
+    setup_interval_task_impl(provider, param, cache_key, cache, refresh_registry, interval)
+}
+
 #[cfg(not(target_family = "wasm"))]
 pub fn setup_interval_task_core<P, Param>(
     provider: &P,
@@ -26,31 +42,11 @@ pub fn setup_interval_task_core<P, Param>(
     P: Provider<Param> + Clone + Send,
     Param: ProviderParamBounds,
 {
-    let cache_clone = cache.clone();
-    let provider_clone = provider.clone();
-    let param_clone = param.clone();
-    let cache_key_clone = cache_key.to_string();
-    let refresh_registry_clone = refresh_registry.clone();
-
-    refresh_registry.start_interval_task(cache_key, interval, move || {
-        let cache_for_task = cache_clone.clone();
-        let provider_for_task = provider_clone.clone();
-        let param_for_task = param_clone.clone();
-        let cache_key_for_task = cache_key_clone.clone();
-        let refresh_registry_for_task = refresh_registry_clone.clone();
-
-        spawn(async move {
-            let result = provider_for_task.run(param_for_task).await;
-            let updated = cache_for_task.set(cache_key_for_task.clone(), result);
-            if updated {
-                refresh_registry_for_task.trigger_refresh(&cache_key_for_task);
-            }
-        });
-    });
+    setup_interval_task_impl(provider, param, cache_key, cache, refresh_registry, interval)
 }
 
 #[cfg(target_family = "wasm")]
-pub fn setup_interval_task_core<P, Param>(
+fn setup_interval_task_impl<P, Param>(
     provider: &P,
     param: &Param,
     cache_key: &str,
@@ -85,6 +81,56 @@ pub fn setup_interval_task_core<P, Param>(
 }
 
 #[cfg(not(target_family = "wasm"))]
+fn setup_interval_task_impl<P, Param>(
+    provider: &P,
+    param: &Param,
+    cache_key: &str,
+    cache: &ProviderCache,
+    refresh_registry: &RefreshRegistry,
+    interval: Duration,
+) where
+    P: Provider<Param> + Clone + Send,
+    Param: ProviderParamBounds,
+{
+    let cache_clone = cache.clone();
+    let provider_clone = provider.clone();
+    let param_clone = param.clone();
+    let cache_key_clone = cache_key.to_string();
+    let refresh_registry_clone = refresh_registry.clone();
+
+    refresh_registry.start_interval_task(cache_key, interval, move || {
+        let cache_for_task = cache_clone.clone();
+        let provider_for_task = provider_clone.clone();
+        let param_for_task = param_clone.clone();
+        let cache_key_for_task = cache_key_clone.clone();
+        let refresh_registry_for_task = refresh_registry_clone.clone();
+
+        spawn(async move {
+            let result = provider_for_task.run(param_for_task).await;
+            let updated = cache_for_task.set(cache_key_for_task.clone(), result);
+            if updated {
+                refresh_registry_for_task.trigger_refresh(&cache_key_for_task);
+            }
+        });
+    });
+}
+
+#[cfg(target_family = "wasm")]
+pub fn setup_cache_expiration_task_core<P, Param>(
+    _provider: &P,
+    _param: &Param,
+    cache_key: &str,
+    cache: &ProviderCache,
+    refresh_registry: &RefreshRegistry,
+    expiration: Duration,
+) where
+    P: Provider<Param> + Clone,
+    Param: ProviderParamBounds,
+{
+    setup_cache_expiration_task_impl(_provider, _param, cache_key, cache, refresh_registry, expiration)
+}
+
+#[cfg(not(target_family = "wasm"))]
 pub fn setup_cache_expiration_task_core<P, Param>(
     _provider: &P,
     _param: &Param,
@@ -96,29 +142,10 @@ pub fn setup_cache_expiration_task_core<P, Param>(
     P: Provider<Param> + Clone + Send,
     Param: ProviderParamBounds,
 {
-    let cache_clone = cache.clone();
-    let cache_key_clone = cache_key.to_string();
-    let refresh_registry_clone = refresh_registry.clone();
-
-    let check_interval = std::cmp::max(expiration / 4, MIN_TASK_INTERVAL);
-
-    refresh_registry.start_periodic_task(
-        cache_key,
-        TaskType::CacheExpiration,
-        check_interval,
-        move || {
-            check_and_handle_cache_expiration(
-                Some(expiration),
-                &cache_key_clone,
-                &cache_clone,
-                &refresh_registry_clone,
-            );
-        },
-    );
+    setup_cache_expiration_task_impl(_provider, _param, cache_key, cache, refresh_registry, expiration)
 }
 
-#[cfg(target_family = "wasm")]
-pub fn setup_cache_expiration_task_core<P, Param>(
+fn setup_cache_expiration_task_impl<P, Param>(
     _provider: &P,
     _param: &Param,
     cache_key: &str,
@@ -148,6 +175,21 @@ pub fn setup_cache_expiration_task_core<P, Param>(
             );
         },
     );
+}
+
+#[cfg(target_family = "wasm")]
+pub fn setup_stale_check_task_core<P, Param>(
+    provider: &P,
+    param: &Param,
+    cache_key: &str,
+    cache: &ProviderCache,
+    refresh_registry: &RefreshRegistry,
+    stale_time: Duration,
+) where
+    P: Provider<Param> + Clone,
+    Param: ProviderParamBounds,
+{
+    setup_stale_check_task_impl(provider, param, cache_key, cache, refresh_registry, stale_time)
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -160,6 +202,21 @@ pub fn setup_stale_check_task_core<P, Param>(
     stale_time: Duration,
 ) where
     P: Provider<Param> + Clone + Send,
+    Param: ProviderParamBounds,
+{
+    setup_stale_check_task_impl(provider, param, cache_key, cache, refresh_registry, stale_time)
+}
+
+#[cfg(target_family = "wasm")]
+fn setup_stale_check_task_impl<P, Param>(
+    provider: &P,
+    param: &Param,
+    cache_key: &str,
+    cache: &ProviderCache,
+    refresh_registry: &RefreshRegistry,
+    stale_time: Duration,
+) where
+    P: Provider<Param> + Clone,
     Param: ProviderParamBounds,
 {
     let cache_clone = cache.clone();
@@ -179,8 +236,8 @@ pub fn setup_stale_check_task_core<P, Param>(
     });
 }
 
-#[cfg(target_family = "wasm")]
-pub fn setup_stale_check_task_core<P, Param>(
+#[cfg(not(target_family = "wasm"))]
+fn setup_stale_check_task_impl<P, Param>(
     provider: &P,
     param: &Param,
     cache_key: &str,
@@ -188,7 +245,7 @@ pub fn setup_stale_check_task_core<P, Param>(
     refresh_registry: &RefreshRegistry,
     stale_time: Duration,
 ) where
-    P: Provider<Param> + Clone,
+    P: Provider<Param> + Clone + Send,
     Param: ProviderParamBounds,
 {
     let cache_clone = cache.clone();

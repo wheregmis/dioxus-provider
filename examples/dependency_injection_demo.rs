@@ -166,40 +166,33 @@ fn UserProfile(user_id: u32) -> Element {
                 "User ID: {user_id}"
             }
 
-            match user() {
-                State::Loading { .. } => rsx! {
-                    div { class: "loading", "Loading user..." }
-                },
-                State::Success(user) => rsx! {
-                    div { class: "user-info",
-                        h2 { "{user.name}" }
-                        p { "Email: {user.email}" }
-                        p { "ID: {user.id}" }
-                    }
-                },
-                State::Error(err) => rsx! {
-                    div { class: "error", "Error loading user: {err}" }
-                },
+            // Using ergonomic State helpers
+            if user().is_loading() {
+                div { class: "loading", "Loading user..." }
+            } else if let Some(user) = user().data() {
+                div { class: "user-info",
+                    h2 { "{user.name}" }
+                    p { "Email: {user.email}" }
+                    p { "ID: {user.id}" }
+                }
+            } else if let Some(err) = user().error() {
+                div { class: "error", "Error loading user: {err}" }
             }
 
-            match posts() {
-                State::Loading { .. } => rsx! {
-                    div { class: "loading", "Loading posts..." }
-                },
-                State::Success(posts) => rsx! {
-                    div { class: "posts",
-                        h3 { "Posts" }
-                        for post in posts {
-                            div { class: "post",
-                                h4 { "{post.title}" }
-                                p { "{post.content}" }
-                            }
+            if posts().is_loading() {
+                div { class: "loading", "Loading posts..." }
+            } else if let Some(posts) = posts().data() {
+                div { class: "posts",
+                    h3 { "Posts" }
+                    for post in posts {
+                        div { class: "post",
+                            h4 { "{post.title}" }
+                            p { "{post.content}" }
                         }
                     }
-                },
-                State::Error(err) => rsx! {
-                    div { class: "error", "Error loading posts: {err}" }
-                },
+                }
+            } else if let Some(err) = posts().error() {
+                div { class: "error", "Error loading posts: {err}" }
             }
         }
     }
@@ -222,45 +215,38 @@ fn CachedUserProfile(user_id: u32) -> Element {
             h3 { "Cached User Profile (30s cache)" }
             p { style: "color: #666; font-size: 0.9em;", "User ID: {user_id}" }
 
-            match cached_user() {
-                State::Loading { .. } => rsx! {
-                    div { class: "loading", "Loading cached user..." }
-                },
-                State::Success(user) => rsx! {
-                    div { class: "user-info",
-                        h4 { "{user.name}" }
-                        p { "Email: {user.email}" }
-                        small { "This data is cached for 30 seconds" }
-                    }
-                },
-                State::Error(err) => rsx! {
-                    div { class: "error", "Error loading cached user: {err}" }
-                },
+            // Using ergonomic State helpers
+            if cached_user().is_loading() {
+                div { class: "loading", "Loading cached user..." }
+            } else if let Some(user) = cached_user().data() {
+                div { class: "user-info",
+                    h4 { "{user.name}" }
+                    p { "Email: {user.email}" }
+                    small { "This data is cached for 30 seconds" }
+                }
+            } else if let Some(err) = cached_user().error() {
+                div { class: "error", "Error loading cached user: {err}" }
             }
 
             h4 { "Fresh Posts (10s stale time)" }
-            match fresh_posts() {
-                State::Loading { .. } => rsx! {
-                    div { class: "loading", "Loading fresh posts..." }
-                },
-                State::Success(posts) => rsx! {
-                    div { class: "posts",
-                        for post in posts {
-                            div { class: "post",
-                                style: "border-left: 3px solid #007acc; padding-left: 10px; margin: 5px 0;",
-                                h5 { "{post.title}" }
-                                p {
-                                    style: "font-size: 0.9em; color: #666;",
-                                    "{post.content}"
-                                }
+            if fresh_posts().is_loading() {
+                div { class: "loading", "Loading fresh posts..." }
+            } else if let Some(posts) = fresh_posts().data() {
+                div { class: "posts",
+                    for post in posts {
+                        div { class: "post",
+                            style: "border-left: 3px solid #007acc; padding-left: 10px; margin: 5px 0;",
+                            h5 { "{post.title}" }
+                            p {
+                                style: "font-size: 0.9em; color: #666;",
+                                "{post.content}"
                             }
                         }
-                        small { "Posts become stale after 10 seconds but are refreshed in background" }
                     }
-                },
-                State::Error(err) => rsx! {
-                    div { class: "error", "Error loading fresh posts: {err}" }
-                },
+                    small { "Posts become stale after 10 seconds but are refreshed in background" }
+                }
+            } else if let Some(err) = fresh_posts().error() {
+                div { class: "error", "Error loading fresh posts: {err}" }
             }
         }
     }
@@ -310,10 +296,10 @@ fn App() -> Element {
                 style: "margin-top: 30px; padding: 15px; background: #e8f4f8; border-left: 4px solid #007acc; border-radius: 4px;",
                 h3 { "How it works:" }
                 ul {
-                    li { "API clients and databases are registered globally at startup" }
+                    li { "Use ensure_dependency() for clean initialization (no manual has_dependency checks)" }
                     li { "Providers use inject::<T>() to access these dependencies" }
                     li { "The #[provider] macro generates clean, functional providers" }
-                    li { "Different cache strategies can be applied with macro arguments" }
+                    li { "State helpers like is_loading(), data(), error() reduce boilerplate" }
                     li { "Dependencies don't need to implement PartialEq or Hash" }
                 }
             }
@@ -323,22 +309,15 @@ fn App() -> Element {
 
 /// Initialize all dependencies
 fn init_dependencies() -> Result<(), ProviderError> {
-    // Note: Dependency injection is initialized via dioxus_provider::init() in main()
+    // Use ensure_dependency for cleaner initialization - no manual has_dependency checks needed!
+    ensure_dependency(ApiClient::new(
+        "https://api.example.com".to_string(),
+        "secret-token".to_string(),
+    ))?;
 
-    // Register API client if not already registered
-    if !has_dependency::<ApiClient>() {
-        let api_client = ApiClient::new(
-            "https://api.example.com".to_string(),
-            "secret-token".to_string(),
-        );
-        register_dependency(api_client)?;
-    }
-
-    // Register database if not already registered
-    if !has_dependency::<Database>() {
-        let database = Database::new("postgresql://localhost/myapp".to_string());
-        register_dependency(database)?;
-    }
+    ensure_dependency(Database::new(
+        "postgresql://localhost/myapp".to_string(),
+    ))?;
 
     Ok(())
 }
