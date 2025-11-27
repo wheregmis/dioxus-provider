@@ -5,6 +5,7 @@ use dioxus::prelude::Key;
 use dioxus::prelude::*;
 use dioxus_provider::provider::{use_provider, State};
 use dioxus_provider::mutation::use_mutation;
+use dioxus_provider::callback::ProviderCallback;
 use serde::{Deserialize, Serialize};
 use tokio::{
     fs,
@@ -160,18 +161,33 @@ async fn delete_todo(id: u64) -> Result<Vec<Todo>, TodoError> {
 pub fn TodoInput() -> Element {
     let mut input = use_signal(String::new);
     
-    // Create mutation with invalidation
+    // Create mutation with invalidation and optimistic update
     let mut add_mutation = use_mutation(add_todo)
         .invalidates(load_todos)
-        .invalidates(load_todo_stats);
-
-    let on_keydown = move |e: Event<KeyboardData>| {
-        if e.key() == Key::Enter {
-            let title = input.read().trim().to_string();
-            if !title.is_empty() {
-                add_mutation.call(title);
-                input.set(String::new());
+        .invalidates(load_todo_stats)
+        .on_optimistic_update(|args, cache| {
+            // Optimistically update the todos list
+            let key = load_todos.cache_key(&());
+            if let Some(Ok(mut todos)) = cache.get::<Result<Vec<Todo>, TodoError>>(&key) {
+                let id = next_todo_id(&todos);
+                todos.push(Todo {
+                    id,
+                    title: args.0.clone(),
+                    completed: false,
+                });
+                
+                // Update cache immediately
+                cache.set(key, Ok::<_, TodoError>(todos.clone()));
+                Some(todos)
+            } else {
+                None
             }
+        });
+
+    // Remove on_keydown to avoid double submission with form
+    let _on_keydown = move |e: Event<KeyboardData>| {
+        if e.key() == Key::Enter {
+           // Handled by form submit
         }
     };
 
@@ -190,7 +206,6 @@ pub fn TodoInput() -> Element {
                 r#type: "text",
                 value: "{input}",
                 oninput: move |e| input.set(e.value().to_string()),
-                onkeydown: on_keydown,
                 placeholder: "What needs to be done?",
                 autofocus: true,
                 class: "flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white text-gray-900 shadow-sm transition-all",
@@ -217,18 +232,52 @@ pub fn TodoItem(todo: Todo) -> Element {
     let mut editing = use_signal(|| false);
     let mut edit_text = use_signal(|| todo.title.clone());
     
-    // Create mutations with invalidations
+    // Create mutations with invalidations and optimistic updates
     let mut toggle_mutation = use_mutation(toggle_todo)
         .invalidates(load_todos)
-        .invalidates(load_todo_stats);
+        .invalidates(load_todo_stats)
+        .on_optimistic_update(|args, cache| {
+            let key = load_todos.cache_key(&());
+            if let Some(Ok(mut todos)) = cache.get::<Result<Vec<Todo>, TodoError>>(&key) {
+                if let Some(todo) = todos.iter_mut().find(|t| t.id == args.0) {
+                    todo.completed = !todo.completed;
+                }
+                cache.set(key, Ok::<_, TodoError>(todos.clone()));
+                Some(todos)
+            } else {
+                None
+            }
+        });
     
     let mut delete_mutation = use_mutation(delete_todo)
         .invalidates(load_todos)
-        .invalidates(load_todo_stats);
+        .invalidates(load_todo_stats)
+        .on_optimistic_update(|args, cache| {
+            let key = load_todos.cache_key(&());
+            if let Some(Ok(mut todos)) = cache.get::<Result<Vec<Todo>, TodoError>>(&key) {
+                todos.retain(|t| t.id != args.0);
+                cache.set(key, Ok::<_, TodoError>(todos.clone()));
+                Some(todos)
+            } else {
+                None
+            }
+        });
     
     let mut update_mutation = use_mutation(update_todo)
         .invalidates(load_todos)
-        .invalidates(load_todo_stats);
+        .invalidates(load_todo_stats)
+        .on_optimistic_update(|args, cache| {
+            let key = load_todos.cache_key(&());
+            if let Some(Ok(mut todos)) = cache.get::<Result<Vec<Todo>, TodoError>>(&key) {
+                if let Some(todo) = todos.iter_mut().find(|t| t.id == args.0) {
+                    todo.title = args.1.clone();
+                }
+                cache.set(key, Ok::<_, TodoError>(todos.clone()));
+                Some(todos)
+            } else {
+                None
+            }
+        });
 
     let todo_id = todo.id;
     let todo_title = todo.title.clone();

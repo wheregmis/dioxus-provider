@@ -529,14 +529,28 @@ where
                             };
 
                             for k in keys_to_remove {
-                                cache.invalidate(&k);
-                                refresh_registry.trigger_refresh(&k);
+                                let has_optimistic = optimistic_fn.read().is_some();
+                                if has_optimistic {
+                                     crate::debug_log!("🔄 [MUTATION] Skipping prefix invalidation for optimistic update: {}", k);
+                                } else {
+                                    cache.invalidate(&k);
+                                    refresh_registry.trigger_refresh(&k);
+                                }
                             }
                         } else {
                             // Exact key invalidation
-                            cache.invalidate(key);
-                            refresh_registry.trigger_refresh(key);
-                            crate::debug_log!("🔄 [MUTATION] Invalidated provider cache: {}", key);
+                            // If we have an optimistic update, we skip invalidation to prevent blinking.
+                            // The optimistic update should have already set the cache to a "good enough" state.
+                            // Ideally, we would update the cache with the real server result here,
+                            // but we don't know which key corresponds to the result type generically.
+                            let has_optimistic = optimistic_fn.read().is_some();
+                            if has_optimistic {
+                                crate::debug_log!("🔄 [MUTATION] Skipping invalidation for optimistic update to prevent blink: {}", key);
+                            } else {
+                                cache.invalidate(key);
+                                refresh_registry.trigger_refresh(key);
+                                crate::debug_log!("🔄 [MUTATION] Invalidated provider cache: {}", key);
+                            }
                         }
                     }
                 });

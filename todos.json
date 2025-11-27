@@ -2,6 +2,16 @@
   {
     "id": 1,
     "title": "hey",
+    "completed": true
+  },
+  {
+    "id": 2,
+    "title": "hey there",
+    "completed": false
+  },
+  {
+    "id": 3,
+    "title": "hey there",
     "completed": false
   }
 ]
