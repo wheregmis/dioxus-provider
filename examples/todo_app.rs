@@ -255,6 +255,7 @@ pub fn TodoItem(todo: Todo) -> Element {
         .on_optimistic_update(|args, cache| {
             let key = load_todos.cache_key(&());
             if let Some(Ok(mut todos)) = cache.get::<Result<Vec<Todo>, TodoError>>(&key) {
+                // Retain todos that DO NOT match the ID (args.0)
                 todos.retain(|t| t.id != args.0);
                 cache.set(key, Ok::<_, TodoError>(todos.clone()));
                 Some(todos)
@@ -372,6 +373,11 @@ pub fn TodoList(filter: Filter) -> Element {
     let filtered_todos = match todos_provider.state() {
         State::Ready => {
             if let Some(todos) = todos_provider.get_data() {
+                // DEBUG LOG
+                if let Some(first) = todos.first() {
+                    println!("TodoList render: first todo completed = {}", first.completed);
+                }
+                
                 let filtered: Vec<Todo> = match filter {
                     Filter::All => todos.clone(),
                     Filter::Active => todos.iter().filter(|t| !t.completed).cloned().collect(),

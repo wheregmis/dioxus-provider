@@ -18,7 +18,8 @@
 //! - `wasmtimer` for web timing and `tokio` for desktop timing
 //! - Automatic task cleanup when components unmount
 
-use dioxus::{core::ReactiveContext, prelude::*};
+use dioxus::core::schedule_update_any;
+use dioxus::prelude::*;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex, atomic::AtomicBool},
@@ -30,9 +31,9 @@ use tokio::time;
 #[cfg(target_family = "wasm")]
 use wasmtimer::tokio as time;
 
-/// Type alias for reactive context storage
-type ReactiveContextSet = Arc<Mutex<HashSet<ReactiveContext>>>;
-type ReactiveContextRegistry = Arc<Mutex<HashMap<String, ReactiveContextSet>>>;
+/// Type alias for refresh subscribers (ScopeIds)
+type RefreshSubscriberSet = Arc<Mutex<HashSet<ScopeId>>>;
+type RefreshSubscriberRegistry = Arc<Mutex<HashMap<String, RefreshSubscriberSet>>>;
 
 /// Task type for different periodic operations
 #[derive(Debug, Clone, PartialEq)]
@@ -54,7 +55,7 @@ type PeriodicTaskRegistry = Arc<Mutex<HashMap<String, (TaskType, Duration, Arc<A
 /// Global registry for refresh signals that can trigger provider re-execution
 ///
 /// The `RefreshRegistry` manages the reactive update system for providers. It tracks
-/// which reactive contexts are subscribed to which providers, maintains refresh counters,
+/// which components (via ScopeId) are subscribed to which providers, maintains refresh counters,
 /// and manages periodic tasks for both auto-refreshing and stale-checking.
 ///
 /// ## Thread Safety
@@ -65,8 +66,8 @@ type PeriodicTaskRegistry = Arc<Mutex<HashMap<String, (TaskType, Duration, Arc<A
 pub struct RefreshRegistry {
     /// Counters for tracking how many times each provider has been refreshed
     refresh_counters: Arc<Mutex<HashMap<String, u64>>>,
-    /// Registry of reactive contexts subscribed to each provider key
-    reactive_contexts: ReactiveContextRegistry,
+    /// Registry of subscribers (ScopeIds) for each provider key
+    subscribers: RefreshSubscriberRegistry,
     /// Registry of periodic tasks (both interval refresh and stale checking)
     periodic_tasks: PeriodicTaskRegistry,
     /// Set of provider keys that are currently being revalidated
@@ -90,25 +91,34 @@ impl RefreshRegistry {
         }
     }
 
-    /// Subscribe a reactive context to refresh events for a provider key
+    /// Subscribe a component scope to refresh events for a provider key
     ///
-    /// When the provider is refreshed, the reactive context will be marked as dirty,
-    /// causing any components using it to re-render.
-    pub fn subscribe_to_refresh(&self, key: &str, reactive_context: ReactiveContext) {
-        if let Ok(mut contexts) = self.reactive_contexts.lock() {
-            let key_contexts = contexts
+    /// When the provider is refreshed, the component will be scheduled for update.
+    pub fn subscribe(&self, key: &str, scope_id: ScopeId) {
+        if let Ok(mut subscribers) = self.subscribers.lock() {
+            let key_subscribers = subscribers
                 .entry(key.to_string())
                 .or_insert_with(|| Arc::new(Mutex::new(HashSet::new())));
-            if let Ok(mut context_set) = key_contexts.lock() {
-                context_set.insert(reactive_context);
+            if let Ok(mut subscriber_set) = key_subscribers.lock() {
+                subscriber_set.insert(scope_id);
+            }
+        }
+    }
+
+    /// Unsubscribe a component scope from refresh events
+    pub fn unsubscribe(&self, key: &str, scope_id: ScopeId) {
+        if let Ok(mut subscribers) = self.subscribers.lock() {
+            if let Some(key_subscribers) = subscribers.get(key) {
+                if let Ok(mut subscriber_set) = key_subscribers.lock() {
+                    subscriber_set.remove(&scope_id);
+                }
             }
         }
     }
 
     /// Trigger a refresh for a provider key
     ///
-    /// This increments the refresh counter and marks all subscribed reactive contexts
-    /// as dirty, causing components to re-render and providers to re-execute.
+    /// This increments the refresh counter and schedules updates for all subscribed components.
     pub fn trigger_refresh(&self, key: &str) {
         // Increment the counter
         if let Ok(mut counters) = self.refresh_counters.lock() {
@@ -116,14 +126,34 @@ impl RefreshRegistry {
             *counter += 1;
         }
 
-        // Mark all reactive contexts as dirty
-        if let Ok(contexts) = self.reactive_contexts.lock()
-            && let Some(key_contexts) = contexts.get(key)
-                && let Ok(context_set) = key_contexts.lock() {
-                    for reactive_context in context_set.iter() {
-                        reactive_context.mark_dirty();
-                    }
-                }
+        // Notify all subscribers
+        if let Ok(subscribers) = self.subscribers.lock()
+            && let Some(key_subscribers) = subscribers.get(key)
+            && let Ok(subscriber_set) = key_subscribers.lock()
+        {
+            for &scope_id in subscriber_set.iter() {
+                // Schedule update for the component
+                (schedule_update_any())(scope_id);
+            }
+        }
+    }
+
+    /// Notify listeners that a cache update has occurred without full re-execution
+    ///
+    /// This is used for optimistic updates where we've already updated the cache data
+    /// and just want components to re-render with the new data, without triggering
+    /// a fetch or re-execution of the provider logic.
+    pub fn notify_update(&self, key: &str) {
+        // We don't increment the refresh counter because that might imply "fetching again"
+        // for some logic. We just want to dirty the contexts.
+        if let Ok(subscribers) = self.subscribers.lock()
+            && let Some(key_subscribers) = subscribers.get(key)
+            && let Ok(subscriber_set) = key_subscribers.lock()
+        {
+            for &scope_id in subscriber_set.iter() {
+                (schedule_update_any())(scope_id);
+            }
+        }
     }
 
     /// Clear all cached data and trigger refresh for all providers
@@ -437,8 +467,8 @@ impl RefreshRegistry {
             0
         };
 
-        let context_count = if let Ok(contexts) = self.reactive_contexts.lock() {
-            contexts.len()
+        let context_count = if let Ok(subscribers) = self.subscribers.lock() {
+            subscribers.len()
         } else {
             0
         };
@@ -467,17 +497,17 @@ impl RefreshRegistry {
     pub fn cleanup(&self) -> RefreshCleanupStats {
         let mut stats = RefreshCleanupStats::default();
 
-        // Clean up unused reactive contexts
-        if let Ok(mut contexts) = self.reactive_contexts.lock() {
-            let initial_context_count = contexts.len();
-            contexts.retain(|_, context_set| {
-                if let Ok(set) = context_set.lock() {
+        // Clean up unused subscribers
+        if let Ok(mut subscribers) = self.subscribers.lock() {
+            let initial_context_count = subscribers.len();
+            subscribers.retain(|_, subscriber_set| {
+                if let Ok(set) = subscriber_set.lock() {
                     !set.is_empty()
                 } else {
                     false
                 }
             });
-            stats.contexts_removed = initial_context_count - contexts.len();
+            stats.contexts_removed = initial_context_count - subscribers.len();
         }
 
         // Clean up completed revalidations (should be empty, but just in case)

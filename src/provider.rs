@@ -6,11 +6,12 @@
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use dioxus::prelude::*;
 use dioxus::core::Task;
+use dioxus::core::current_scope_id;
+use dioxus::prelude::*;
 use dioxus_stores::{Store, use_store};
 
-use crate::cache::{CacheGetOptions, ProviderCache};
+use crate::cache::{CacheGetOptions, Instant, ProviderCache};
 use crate::callback::ProviderCallback;
 use crate::global::get_global_runtime_handles;
 use crate::refresh::RefreshRegistry;
@@ -49,7 +50,9 @@ pub struct ProviderData<O: Clone + PartialEq + 'static, E: Clone + PartialEq + '
     pub interval: Option<Duration>,
 }
 
-impl<O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Default for ProviderData<O, E> {
+impl<O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Default
+    for ProviderData<O, E>
+{
     fn default() -> Self {
         Self {
             state: State::Idle,
@@ -90,6 +93,7 @@ impl<O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Default for
 ///     let value = user.data().value();  // Only subscribes to value changes
 /// }
 /// ```
+#[derive(PartialEq)]
 pub struct Provider<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> {
     /// Store containing the provider state - provides fine-grained reactivity
     pub(crate) store: Store<ProviderData<O, E>>,
@@ -109,19 +113,16 @@ pub struct Provider<I: 'static, O: Clone + PartialEq + 'static, E: Clone + Parti
 }
 
 // Provider is Copy because all fields are Copy (Store and Signal are Copy)
-impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Copy for Provider<I, O, E> {}
-
-impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Clone for Provider<I, O, E> {
-    fn clone(&self) -> Self {
-        *self
-    }
+impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Copy
+    for Provider<I, O, E>
+{
 }
 
-impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> PartialEq for Provider<I, O, E> {
-    fn eq(&self, _other: &Self) -> bool {
-        // Providers are considered equal if they have the same cache key
-        // This is used by Dioxus component memoization
-        false // Always re-render for now, can be optimized later
+impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Clone
+    for Provider<I, O, E>
+{
+    fn clone(&self) -> Self {
+        *self
     }
 }
 
@@ -142,7 +143,9 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
     /// Data older than this duration will be considered stale and will trigger
     /// a background revalidation while still serving the stale data.
     pub fn stale_time(self, duration: Duration) -> Self {
-        self.store.stale_time().set(Some(duration));
+        if self.store.stale_time().read().as_ref() != Some(&duration) {
+            self.store.stale_time().set(Some(duration));
+        }
         self
     }
 
@@ -151,7 +154,9 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
     /// Data older than this duration will be removed from cache entirely,
     /// forcing a fresh fetch on the next access.
     pub fn cache_expiration(self, duration: Duration) -> Self {
-        self.store.cache_expiration().set(Some(duration));
+        if self.store.cache_expiration().read().as_ref() != Some(&duration) {
+            self.store.cache_expiration().set(Some(duration));
+        }
         self
     }
 
@@ -159,7 +164,9 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
     ///
     /// The provider will automatically refetch data at this interval.
     pub fn interval(self, duration: Duration) -> Self {
-        self.store.interval().set(Some(duration));
+        if self.store.interval().read().as_ref() != Some(&duration) {
+            self.store.interval().set(Some(duration));
+        }
         self
     }
 
@@ -254,7 +261,8 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
     }
 }
 
-impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> std::fmt::Debug for Provider<I, O, E>
+impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> std::fmt::Debug
+    for Provider<I, O, E>
 where
     O: std::fmt::Debug,
     E: std::fmt::Debug,
@@ -270,7 +278,9 @@ where
 
 // Implement call methods for different arities
 
-impl<O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + PartialEq + 'static> Provider<(), O, E> {
+impl<O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + PartialEq + 'static>
+    Provider<(), O, E>
+{
     /// Call the provider with no arguments.
     pub fn call(&mut self) {
         let cache_key = (self.cache_key_fn.read())(&());
@@ -289,8 +299,11 @@ impl<O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + Part
     }
 }
 
-impl<A: Clone + 'static, O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + PartialEq + 'static>
-    Provider<(A,), O, E>
+impl<
+    A: Clone + 'static,
+    O: Clone + Send + Sync + PartialEq + 'static,
+    E: Clone + Send + Sync + PartialEq + 'static,
+> Provider<(A,), O, E>
 {
     /// Call the provider with one argument.
     pub fn call(&mut self, a: A) {
@@ -311,11 +324,11 @@ impl<A: Clone + 'static, O: Clone + Send + Sync + PartialEq + 'static, E: Clone 
 }
 
 impl<
-        A: Clone + 'static,
-        B: Clone + 'static,
-        O: Clone + Send + Sync + PartialEq + 'static,
-        E: Clone + Send + Sync + PartialEq + 'static,
-    > Provider<(A, B), O, E>
+    A: Clone + 'static,
+    B: Clone + 'static,
+    O: Clone + Send + Sync + PartialEq + 'static,
+    E: Clone + Send + Sync + PartialEq + 'static,
+> Provider<(A, B), O, E>
 {
     /// Call the provider with two arguments.
     pub fn call(&mut self, a: A, b: B) {
@@ -336,12 +349,12 @@ impl<
 }
 
 impl<
-        A: Clone + 'static,
-        B: Clone + 'static,
-        C: Clone + 'static,
-        O: Clone + Send + Sync + PartialEq + 'static,
-        E: Clone + Send + Sync + PartialEq + 'static,
-    > Provider<(A, B, C), O, E>
+    A: Clone + 'static,
+    B: Clone + 'static,
+    C: Clone + 'static,
+    O: Clone + Send + Sync + PartialEq + 'static,
+    E: Clone + Send + Sync + PartialEq + 'static,
+> Provider<(A, B, C), O, E>
 {
     /// Call the provider with three arguments.
     pub fn call(&mut self, a: A, b: B, c: C) {
@@ -362,13 +375,13 @@ impl<
 }
 
 impl<
-        A: Clone + 'static,
-        B: Clone + 'static,
-        C: Clone + 'static,
-        D: Clone + 'static,
-        O: Clone + Send + Sync + PartialEq + 'static,
-        E: Clone + Send + Sync + PartialEq + 'static,
-    > Provider<(A, B, C, D), O, E>
+    A: Clone + 'static,
+    B: Clone + 'static,
+    C: Clone + 'static,
+    D: Clone + 'static,
+    O: Clone + Send + Sync + PartialEq + 'static,
+    E: Clone + Send + Sync + PartialEq + 'static,
+> Provider<(A, B, C, D), O, E>
 {
     /// Call the provider with four arguments.
     pub fn call(&mut self, a: A, b: B, c: C, d: D) {
@@ -390,7 +403,10 @@ impl<
 
 /// Internal function to check cache and set initial state.
 /// Returns true if a fetch should proceed, false if cache hit was sufficient.
-fn check_cache_and_set_state<O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + PartialEq + 'static>(
+fn check_cache_and_set_state<
+    O: Clone + Send + Sync + PartialEq + 'static,
+    E: Clone + Send + Sync + PartialEq + 'static,
+>(
     store: Store<ProviderData<O, E>>,
     mut task_signal: Signal<Option<Task>>,
     cache: &ProviderCache,
@@ -405,15 +421,14 @@ fn check_cache_and_set_state<O: Clone + Send + Sync + PartialEq + 'static, E: Cl
     // Check cache first
     let stale_time = store.stale_time().cloned();
     let cache_expiration = store.cache_expiration().cloned();
-    
+
     let cache_options = CacheGetOptions {
         expiration: cache_expiration,
         stale_time,
         check_staleness: stale_time.is_some(),
     };
 
-    if let Some(result) = cache.get_with_options::<Result<O, E>>(cache_key, cache_options.clone())
-    {
+    if let Some(result) = cache.get_with_options::<Result<O, E>>(cache_key, cache_options.clone()) {
         match result.data {
             Ok(data) => {
                 store.value().set(Some(data));
@@ -516,6 +531,7 @@ where
 
                 // Spawn the actual fetch
                 spawn(async move {
+                    let start_time = Instant::now();
                     let result = user_fn.call(input).await;
 
                     match &result {
@@ -531,11 +547,11 @@ where
                         }
                     }
 
-                    // Store in cache
-                    cache.set(cache_key_clone.clone(), result);
-
-                    // Trigger refresh for any subscribers
-                    refresh_registry.trigger_refresh(&cache_key_clone);
+                    // Store in cache, preventing race conditions
+                    if cache.set_if_not_updated_since(cache_key_clone.clone(), result, start_time) {
+                        // Trigger refresh for any subscribers ONLY if we actually updated the cache
+                        refresh_registry.trigger_refresh(&cache_key_clone);
+                    }
                 });
 
                 cache_key
@@ -548,6 +564,49 @@ where
             let user_fn = user_fn.clone();
             Box::new(move |input: &F::Input| user_fn.cache_key(input))
         });
+
+    // Subscribe to refresh registry to react to external updates (e.g. optimistic mutations)
+    // We use the current scope ID to schedule updates directly
+    let scope_id = current_scope_id();
+
+    use_effect(move || {
+        if let Some(key) = store.cache_key().read().clone() {
+            let reg = refresh_registry.read();
+            reg.subscribe(&key, scope_id);
+        }
+    });
+
+    // Sync with global cache on every render (if triggered by refresh_trigger)
+    // This ensures we pick up optimistic updates immediately.
+    // We use a separate block to ensure all read locks are dropped before we try to write.
+    let update_to_apply = {
+        let cache_key_signal = store.cache_key();
+        let key_read = cache_key_signal.read();
+        if let Some(key) = key_read.as_ref() {
+            let cache_read = cache.read();
+            if let Some(Ok(data)) = cache_read.get::<Result<O, E>>(key) {
+                // Check if we need to update
+                let value_signal = store.value();
+                let value_read = value_signal.read();
+                if value_read.as_ref() != Some(&data) {
+                    Some(data)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    };
+
+    if let Some(data) = update_to_apply {
+        crate::debug_log!("🔄 [SYNC] Syncing provider with global cache",);
+        store.value().set(Some(data));
+        store.state().set(State::Ready);
+        store.error().set(None);
+    }
 
     Provider {
         store,

@@ -482,10 +482,36 @@ where
                         store.is_optimistic().set(true);
                         store.state().set(MutationState::Pending);
                         crate::debug_log!("✨ [MUTATION] Applied optimistic update");
+                        
+                        // Trigger immediate update for invalidated keys
+                        // This ensures the UI reflects the optimistic change instantly
+                        for key in invalidation_keys.iter() {
+                            if let Some(prefix) = key.strip_prefix("prefix:") {
+                                // For prefix, we can't easily find all matching keys without scanning cache
+                                // But we can try scanning if needed, or just skip optimization for prefix
+                                // For now, let's scan since we want instant updates
+                                if let Ok(c) = cache.cache.lock() {
+                                    for k in c.keys() {
+                                        if k.starts_with(prefix) {
+                                            refresh_registry.notify_update(k);
+                                        }
+                                    }
+                                }
+                            } else {
+                                refresh_registry.notify_update(key);
+                            }
+                        }
                     } else {
                         // Even if no value returned, we still mark as pending/optimistic if the function ran
                         // This allows for side-effect only optimistic updates (like cache modification)
                         store.state().set(MutationState::Pending);
+                        
+                        // Still notify if function ran
+                        for key in invalidation_keys.iter() {
+                            if !key.starts_with("prefix:") {
+                                refresh_registry.notify_update(key);
+                            }
+                        }
                     }
                 }
 
@@ -528,29 +554,35 @@ where
                                 }
                             };
 
-                            for k in keys_to_remove {
-                                let has_optimistic = optimistic_fn.read().is_some();
-                                if has_optimistic {
-                                     crate::debug_log!("🔄 [MUTATION] Skipping prefix invalidation for optimistic update: {}", k);
-                                } else {
-                                    cache.invalidate(&k);
-                                    refresh_registry.trigger_refresh(&k);
-                                }
-                            }
+            for k in keys_to_remove {
+                let has_optimistic = optimistic_fn.read().is_some();
+                if has_optimistic {
+                     crate::debug_log!("🔄 [MUTATION] Skipping prefix invalidation for optimistic update: {}", k);
+                     refresh_registry.notify_update(&k);
+                } else {
+                    cache.invalidate(&k);
+                    refresh_registry.trigger_refresh(&k);
+                }
+            }
                         } else {
                             // Exact key invalidation
                             // If we have an optimistic update, we skip invalidation to prevent blinking.
                             // The optimistic update should have already set the cache to a "good enough" state.
                             // Ideally, we would update the cache with the real server result here,
                             // but we don't know which key corresponds to the result type generically.
-                            let has_optimistic = optimistic_fn.read().is_some();
-                            if has_optimistic {
-                                crate::debug_log!("🔄 [MUTATION] Skipping invalidation for optimistic update to prevent blink: {}", key);
-                            } else {
-                                cache.invalidate(key);
-                                refresh_registry.trigger_refresh(key);
-                                crate::debug_log!("🔄 [MUTATION] Invalidated provider cache: {}", key);
-                            }
+                // If we have an optimistic update, we skip standard invalidation to avoid the blink.
+                // BUT, we must still notify components that the data has changed so they re-render
+                // with the new optimistic data we just put in the cache.
+                let has_optimistic = optimistic_fn.read().is_some();
+                if has_optimistic {
+                    crate::debug_log!("🔄 [MUTATION] Skipping invalidation for optimistic update to prevent blink: {}", key);
+                    // Notify listeners that data changed, but don't trigger a "refresh" (fetch)
+                    refresh_registry.notify_update(key);
+                } else {
+                    cache.invalidate(key);
+                    refresh_registry.trigger_refresh(key);
+                    crate::debug_log!("🔄 [MUTATION] Invalidated provider cache: {}", key);
+                }
                         }
                     }
                 });

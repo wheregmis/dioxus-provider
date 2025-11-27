@@ -29,9 +29,9 @@ use crate::platform::{DEFAULT_MAX_CACHE_SIZE, DEFAULT_UNUSED_THRESHOLD};
 
 // Platform-specific time imports
 #[cfg(not(target_family = "wasm"))]
-use std::time::Instant;
+pub use std::time::Instant;
 #[cfg(target_family = "wasm")]
-use web_time::Instant;
+pub use web_time::Instant;
 
 use std::marker::PhantomData;
 
@@ -585,6 +585,56 @@ impl ProviderCache {
                     key
                 );
                 return false;
+            }
+            cache.insert(key.clone(), CacheEntry::new(value));
+            crate::debug_log!("📊 [CACHE-STORE] Stored data for key: {}", key);
+            return true;
+        }
+        false
+    }
+
+    /// Sets a value for a given key, but only if the entry hasn't been updated since `since`.
+    ///
+    /// This helps prevent race conditions where a stale fetch overwrites a newer optimistic update.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The key to set.
+    /// * `value` - The value to set.
+    /// * `since` - The timestamp when the operation (fetch) started.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the value was set, `false` if it was discarded due to a newer update.
+    pub fn set_if_not_updated_since<T: Clone + Send + Sync + PartialEq + 'static>(
+        &self,
+        key: String,
+        value: T,
+        since: Instant,
+    ) -> bool {
+        if let Ok(mut cache) = self.cache.lock() {
+            if let Some(existing_entry) = cache.get(&key) {
+                if let Ok(cached_at) = existing_entry.cached_at.lock() {
+                    if *cached_at > since {
+                        crate::debug_log!(
+                            "🛡️ [CACHE-RACE] Discarding stale set for key: {} (updated recently)",
+                            key
+                        );
+                        return false;
+                    }
+                }
+            }
+            // Proceed with set (duplicating set logic to avoid double lock)
+            if let Some(existing_entry) = cache.get_mut(&key)
+                && let Some(existing_value) = existing_entry.get::<T>()
+                && existing_value == value
+            {
+                existing_entry.refresh_timestamp();
+                crate::debug_log!(
+                    "⏸️ [CACHE-STORE] Value unchanged for key: {}, refreshing timestamp",
+                    key
+                );
+                return false; // Considered "set" but no change
             }
             cache.insert(key.clone(), CacheEntry::new(value));
             crate::debug_log!("📊 [CACHE-STORE] Stored data for key: {}", key);
