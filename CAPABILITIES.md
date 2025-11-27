@@ -4,9 +4,9 @@ This matrix captures the behaviours showcased in the shipped examples so we can 
 
 | Capability | Example(s) | Status |
 | --- | --- | --- |
-| Lifecycle controls (interval/SWR/TTL) | `examples/comprehensive_demo.rs` (`fetch_live_metrics`, `fetch_user_dashboard`, `fetch_analytics_report`, `fetch_chat_messages`) | Stable |
-| Optimistic mutations w/ invalidation | `examples/todo_app.rs:137-196` (`add_todo`, `toggle_todo`, `update_todo`, `delete_todo`) | Experimental |
-| Provider composition (parallel fetch) | `examples/composable_provider_demo.rs:1-195` | Stable |
-| Dependency injection (global resources) | `examples/dependency_injection_demo.rs:93-199` | Stable |
+| Lifecycle controls (interval/SWR/TTL) | `examples/features_overview.rs` (Basic & Lifecycle tab) | Stable |
+| Optimistic mutations w/ invalidation | `examples/optimistic_minimal.rs`, `examples/todo_app.rs` | Stable |
+| Provider composition (parallel fetch) | `examples/features_overview.rs` (Composition tab) | Stable |
+| Dependency injection (global resources) | `examples/features_overview.rs` (Parameterized & DI tab) | Stable |
 
 > **Note:** Optimistic mutations are still evolving and may change during cleanup; treat that surface as experimental until the new runtime lands.

@@ -17,7 +17,7 @@ use crate::refresh::RefreshRegistry;
 
 /// The state of a provider
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
-pub enum ProviderState {
+pub enum State {
     /// Provider has not been called yet
     Idle,
     /// Provider is currently fetching data
@@ -25,7 +25,7 @@ pub enum ProviderState {
     /// Provider has successfully fetched data
     Ready,
     /// Provider encountered an error
-    Errored,
+    Error,
     /// Provider was reset/cancelled
     Reset,
 }
@@ -34,7 +34,7 @@ pub enum ProviderState {
 #[derive(Store, Clone, PartialEq)]
 pub struct ProviderData<O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> {
     /// The current state
-    pub state: ProviderState,
+    pub state: State,
     /// The current value (if successfully fetched)
     pub value: Option<O>,
     /// The current error (if fetch failed)
@@ -52,7 +52,7 @@ pub struct ProviderData<O: Clone + PartialEq + 'static, E: Clone + PartialEq + '
 impl<O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Default for ProviderData<O, E> {
     fn default() -> Self {
         Self {
-            state: ProviderState::Idle,
+            state: State::Idle,
             value: None,
             error: None,
             cache_key: None,
@@ -86,7 +86,7 @@ impl<O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Default for
 /// user.call(123);
 ///
 /// // Access value with fine-grained reactivity
-/// if user.data().state() == ProviderState::Ready {
+/// if user.data().state() == State::Ready {
 ///     let value = user.data().value();  // Only subscribes to value changes
 /// }
 /// ```
@@ -97,7 +97,8 @@ pub struct Provider<I: 'static, O: Clone + PartialEq + 'static, E: Clone + Parti
     pub(crate) task: Signal<Option<Task>>,
     /// The callback to execute
     pub(crate) callback: Signal<Box<dyn Fn(I) -> String + 'static>>,
-    /// Cache key generator
+    /// Function to generate cache keys
+    #[allow(clippy::type_complexity)]
     pub(crate) cache_key_fn: Signal<Box<dyn Fn(&I) -> String + 'static>>,
     /// Cache reference
     pub(crate) cache: Signal<ProviderCache>,
@@ -113,6 +114,14 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
 impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> Clone for Provider<I, O, E> {
     fn clone(&self) -> Self {
         *self
+    }
+}
+
+impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static> PartialEq for Provider<I, O, E> {
+    fn eq(&self, _other: &Self) -> bool {
+        // Providers are considered equal if they have the same cache key
+        // This is used by Dioxus component memoization
+        false // Always re-render for now, can be optimized later
     }
 }
 
@@ -161,15 +170,15 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
     pub fn value(&self) -> Option<Result<O, E>> {
         let state = self.store.state().cloned();
         match state {
-            ProviderState::Ready => self.store.value().cloned().map(Ok),
-            ProviderState::Errored => self.store.error().cloned().map(Err),
+            State::Ready => self.store.value().cloned().map(Ok),
+            State::Error => self.store.error().cloned().map(Err),
             _ => None,
         }
     }
 
     /// Get the current data if successfully fetched.
     pub fn get_data(&self) -> Option<O> {
-        if self.store.state().cloned() == ProviderState::Ready {
+        if self.store.state().cloned() == State::Ready {
             self.store.value().cloned()
         } else {
             None
@@ -178,7 +187,7 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
 
     /// Get the current error if fetch failed.
     pub fn error(&self) -> Option<E> {
-        if self.store.state().cloned() == ProviderState::Errored {
+        if self.store.state().cloned() == State::Error {
             self.store.error().cloned()
         } else {
             None
@@ -187,26 +196,26 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
 
     /// Check if the provider is currently fetching.
     pub fn pending(&self) -> bool {
-        self.store.state().cloned() == ProviderState::Pending
+        self.store.state().cloned() == State::Pending
     }
 
     /// Check if the provider is idle (not yet called).
     pub fn idle(&self) -> bool {
-        self.store.state().cloned() == ProviderState::Idle
+        self.store.state().cloned() == State::Idle
     }
 
     /// Check if the provider has data ready.
     pub fn ready(&self) -> bool {
-        self.store.state().cloned() == ProviderState::Ready
+        self.store.state().cloned() == State::Ready
     }
 
     /// Check if the provider has errored.
     pub fn errored(&self) -> bool {
-        self.store.state().cloned() == ProviderState::Errored
+        self.store.state().cloned() == State::Error
     }
 
     /// Get the current state.
-    pub fn state(&self) -> ProviderState {
+    pub fn state(&self) -> State {
         self.store.state().cloned()
     }
 
@@ -215,7 +224,7 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
         if let Some(task) = self.task.write().take() {
             task.cancel();
         }
-        self.store.state().set(ProviderState::Reset);
+        self.store.state().set(State::Reset);
         self.store.value().set(None);
         self.store.error().set(None);
         self.store.cache_key().set(None);
@@ -226,8 +235,8 @@ impl<I: 'static, O: Clone + PartialEq + 'static, E: Clone + PartialEq + 'static>
         if let Some(task) = self.task.write().take() {
             task.cancel();
         }
-        if self.store.state().cloned() == ProviderState::Pending {
-            self.store.state().set(ProviderState::Reset);
+        if self.store.state().cloned() == State::Pending {
+            self.store.state().set(State::Reset);
         }
     }
 
@@ -266,15 +275,17 @@ impl<O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + Part
     pub fn call(&mut self) {
         let cache_key = (self.cache_key_fn.read())(&());
         self.store.cache_key().set(Some(cache_key.clone()));
-        execute_provider_fetch(
+        let should_fetch = check_cache_and_set_state(
             self.store,
             self.task,
-            self.cache.read().clone(),
-            self.refresh_registry.read().clone(),
-            cache_key,
+            &self.cache.read(),
+            &self.refresh_registry.read(),
+            &cache_key,
         );
-        // Trigger the actual fetch
-        (self.callback.read())(());
+        if should_fetch {
+            // Trigger the actual fetch
+            (self.callback.read())(());
+        }
     }
 }
 
@@ -286,15 +297,16 @@ impl<A: Clone + 'static, O: Clone + Send + Sync + PartialEq + 'static, E: Clone 
         let input = (a.clone(),);
         let cache_key = (self.cache_key_fn.read())(&input);
         self.store.cache_key().set(Some(cache_key.clone()));
-        execute_provider_fetch(
+        let should_fetch = check_cache_and_set_state(
             self.store,
             self.task,
-            self.cache.read().clone(),
-            self.refresh_registry.read().clone(),
-            cache_key,
+            &self.cache.read(),
+            &self.refresh_registry.read(),
+            &cache_key,
         );
-        // Trigger the actual fetch
-        (self.callback.read())(input);
+        if should_fetch {
+            (self.callback.read())(input);
+        }
     }
 }
 
@@ -310,15 +322,16 @@ impl<
         let input = (a.clone(), b.clone());
         let cache_key = (self.cache_key_fn.read())(&input);
         self.store.cache_key().set(Some(cache_key.clone()));
-        execute_provider_fetch(
+        let should_fetch = check_cache_and_set_state(
             self.store,
             self.task,
-            self.cache.read().clone(),
-            self.refresh_registry.read().clone(),
-            cache_key,
+            &self.cache.read(),
+            &self.refresh_registry.read(),
+            &cache_key,
         );
-        // Trigger the actual fetch
-        (self.callback.read())(input);
+        if should_fetch {
+            (self.callback.read())(input);
+        }
     }
 }
 
@@ -335,15 +348,16 @@ impl<
         let input = (a.clone(), b.clone(), c.clone());
         let cache_key = (self.cache_key_fn.read())(&input);
         self.store.cache_key().set(Some(cache_key.clone()));
-        execute_provider_fetch(
+        let should_fetch = check_cache_and_set_state(
             self.store,
             self.task,
-            self.cache.read().clone(),
-            self.refresh_registry.read().clone(),
-            cache_key,
+            &self.cache.read(),
+            &self.refresh_registry.read(),
+            &cache_key,
         );
-        // Trigger the actual fetch
-        (self.callback.read())(input);
+        if should_fetch {
+            (self.callback.read())(input);
+        }
     }
 }
 
@@ -361,26 +375,28 @@ impl<
         let input = (a.clone(), b.clone(), c.clone(), d.clone());
         let cache_key = (self.cache_key_fn.read())(&input);
         self.store.cache_key().set(Some(cache_key.clone()));
-        execute_provider_fetch(
+        let should_fetch = check_cache_and_set_state(
             self.store,
             self.task,
-            self.cache.read().clone(),
-            self.refresh_registry.read().clone(),
-            cache_key,
+            &self.cache.read(),
+            &self.refresh_registry.read(),
+            &cache_key,
         );
-        // Trigger the actual fetch
-        (self.callback.read())(input);
+        if should_fetch {
+            (self.callback.read())(input);
+        }
     }
 }
 
-/// Internal function to check cache and set initial state
-fn execute_provider_fetch<O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + PartialEq + 'static>(
+/// Internal function to check cache and set initial state.
+/// Returns true if a fetch should proceed, false if cache hit was sufficient.
+fn check_cache_and_set_state<O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + PartialEq + 'static>(
     store: Store<ProviderData<O, E>>,
     mut task_signal: Signal<Option<Task>>,
-    cache: ProviderCache,
-    refresh_registry: RefreshRegistry,
-    cache_key: String,
-) {
+    cache: &ProviderCache,
+    refresh_registry: &RefreshRegistry,
+    cache_key: &str,
+) -> bool {
     // Cancel any existing task
     if let Some(task) = task_signal.write().take() {
         task.cancel();
@@ -396,13 +412,13 @@ fn execute_provider_fetch<O: Clone + Send + Sync + PartialEq + 'static, E: Clone
         check_staleness: stale_time.is_some(),
     };
 
-    if let Some(result) = cache.get_with_options::<Result<O, E>>(&cache_key, cache_options.clone())
+    if let Some(result) = cache.get_with_options::<Result<O, E>>(cache_key, cache_options.clone())
     {
         match result.data {
             Ok(data) => {
                 store.value().set(Some(data));
                 store.error().set(None);
-                store.state().set(ProviderState::Ready);
+                store.state().set(State::Ready);
 
                 // If stale, trigger background revalidation
                 if result.is_stale {
@@ -410,25 +426,27 @@ fn execute_provider_fetch<O: Clone + Send + Sync + PartialEq + 'static, E: Clone
                         "📦 [CACHE-HIT-STALE] Serving stale data for key: {}, triggering revalidation",
                         cache_key
                     );
-                    refresh_registry.trigger_refresh(&cache_key);
+                    refresh_registry.trigger_refresh(cache_key);
+                    return true; // Proceed with background fetch
                 } else {
                     crate::debug_log!("📦 [CACHE-HIT] Serving fresh data for key: {}", cache_key);
                 }
-                return;
+                return false; // No fetch needed
             }
             Err(e) => {
                 // Cached error - still return it but maybe refetch
                 store.error().set(Some(e));
                 store.value().set(None);
-                store.state().set(ProviderState::Errored);
-                return;
+                store.state().set(State::Error);
+                return false;
             }
         }
     }
 
     // No cache hit, need to fetch
-    store.state().set(ProviderState::Pending);
+    store.state().set(State::Pending);
     crate::debug_log!("🔄 [FETCH] Starting fetch for key: {}", cache_key);
+    true
 }
 
 /// Create a provider from an async function.
@@ -452,7 +470,7 @@ fn execute_provider_fetch<O: Clone + Send + Sync + PartialEq + 'static, E: Clone
 /// user.call(123);
 ///
 /// // Fine-grained reactivity - only subscribes to state changes
-/// if user.data().state().cloned() == ProviderState::Ready {
+/// if user.data().state().cloned() == State::Ready {
 ///     // This only re-renders when value changes
 ///     let value = user.data().value().cloned();
 /// }
@@ -504,12 +522,12 @@ where
                         Ok(data) => {
                             store.error().set(None);
                             store.value().set(Some(data.clone()));
-                            store.state().set(ProviderState::Ready);
+                            store.state().set(State::Ready);
                         }
                         Err(e) => {
                             store.error().set(Some(e.clone()));
                             store.value().set(None);
-                            store.state().set(ProviderState::Errored);
+                            store.state().set(State::Error);
                         }
                     }
 

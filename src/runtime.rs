@@ -2,11 +2,6 @@
 //!
 //! This module lets us manage cache, refresh, and dependency injection handles from one place.
 
-pub mod cache_mgmt;
-pub mod request;
-pub mod swr;
-pub mod tasks;
-
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -15,13 +10,7 @@ use std::{
 
 use crate::{
     cache::ProviderCache,
-    hooks::Provider,
     refresh::{RefreshRegistry, TaskType},
-    types::ProviderParamBounds,
-};
-use cache_mgmt::setup_intelligent_cache_management;
-use tasks::{
-    setup_cache_expiration_task_core, setup_interval_task_core, setup_stale_check_task_core,
 };
 
 /// Configuration for the provider runtime.
@@ -55,33 +44,6 @@ impl Default for ProviderRuntimeConfig {
     }
 }
 
-/// Lifecycle policy attached to every provider.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderLifecyclePolicy {
-    pub interval: Option<Duration>,
-    pub cache_expiration: Option<Duration>,
-    pub stale_time: Option<Duration>,
-}
-
-impl ProviderLifecyclePolicy {
-    pub fn new() -> Self {
-        Self {
-            interval: None,
-            cache_expiration: None,
-            stale_time: None,
-        }
-    }
-
-    pub fn is_noop(&self) -> bool {
-        self.interval.is_none() && self.cache_expiration.is_none() && self.stale_time.is_none()
-    }
-}
-
-impl Default for ProviderLifecyclePolicy {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 /// Central runtime that holds onto core singletons.
 #[derive(Clone)]
@@ -156,14 +118,13 @@ impl ProviderRuntime {
 
     /// Complete a pending request and return the number of waiters that were affected.
     pub fn mark_request_complete(&self, cache_key: &str) {
-        if let Ok(mut pending) = self.pending_requests.lock() {
-            if pending.remove(cache_key).is_some() {
+        if let Ok(mut pending) = self.pending_requests.lock()
+            && pending.remove(cache_key).is_some() {
                 crate::debug_log!(
                     "✅ [REQUEST-DEDUP] Request completed for key: {}",
                     cache_key
                 );
             }
-        }
     }
 
     /// Number of components waiting on a given cache key.
@@ -172,110 +133,6 @@ impl ProviderRuntime {
             *pending.get(cache_key).unwrap_or(&0)
         } else {
             0
-        }
-    }
-
-    /// Ensure scheduled tasks are registered for a provider key (native targets).
-    #[cfg(not(target_family = "wasm"))]
-    pub fn ensure_provider_tasks<P, Param>(&self, provider: &P, param: &Param, cache_key: &str)
-    where
-        P: Provider<Param> + Clone + Send,
-        Param: ProviderParamBounds,
-    {
-        let policy = provider.lifecycle();
-        if policy.is_noop() {
-            return;
-        }
-
-        if let Some(expiration) = policy.cache_expiration {
-            setup_intelligent_cache_management(
-                expiration,
-                cache_key,
-                &self.cache,
-                &self.refresh_registry,
-            );
-            setup_cache_expiration_task_core(
-                provider,
-                param,
-                cache_key,
-                &self.cache,
-                &self.refresh_registry,
-                expiration,
-            );
-        }
-
-        if let Some(interval) = policy.interval {
-            setup_interval_task_core(
-                provider,
-                param,
-                cache_key,
-                &self.cache,
-                &self.refresh_registry,
-                interval,
-            );
-        }
-
-        if let Some(stale) = policy.stale_time {
-            setup_stale_check_task_core(
-                provider,
-                param,
-                cache_key,
-                &self.cache,
-                &self.refresh_registry,
-                stale,
-            );
-        }
-    }
-
-    /// Ensure scheduled tasks are registered for a provider key (WASM targets).
-    #[cfg(target_family = "wasm")]
-    pub fn ensure_provider_tasks<P, Param>(&self, provider: &P, param: &Param, cache_key: &str)
-    where
-        P: Provider<Param> + Clone,
-        Param: ProviderParamBounds,
-    {
-        let policy = provider.lifecycle();
-        if policy.is_noop() {
-            return;
-        }
-
-        if let Some(expiration) = policy.cache_expiration {
-            setup_intelligent_cache_management(
-                expiration,
-                cache_key,
-                &self.cache,
-                &self.refresh_registry,
-            );
-            setup_cache_expiration_task_core(
-                provider,
-                param,
-                cache_key,
-                &self.cache,
-                &self.refresh_registry,
-                expiration,
-            );
-        }
-
-        if let Some(interval) = policy.interval {
-            setup_interval_task_core(
-                provider,
-                param,
-                cache_key,
-                &self.cache,
-                &self.refresh_registry,
-                interval,
-            );
-        }
-
-        if let Some(stale) = policy.stale_time {
-            setup_stale_check_task_core(
-                provider,
-                param,
-                cache_key,
-                &self.cache,
-                &self.refresh_registry,
-                stale,
-            );
         }
     }
 }

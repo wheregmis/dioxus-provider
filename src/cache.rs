@@ -33,6 +33,33 @@ use std::time::Instant;
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
 
+use std::marker::PhantomData;
+
+/// A type-safe cache key that preserves the type of the stored data.
+///
+/// This wrapper ensures that you can only retrieve data of the correct type
+/// for a given key, preventing runtime type mismatch errors.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypedKey<T> {
+    pub(crate) key: String,
+    pub(crate) _phantom: PhantomData<T>,
+}
+
+impl<T> TypedKey<T> {
+    /// Create a new typed key from a string key.
+    pub fn new(key: String) -> Self {
+        Self {
+            key,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Get the underlying string key.
+    pub fn as_str(&self) -> &str {
+        &self.key
+    }
+}
+
 /// Options for cache retrieval operations
 #[derive(Debug, Clone, Default)]
 pub struct CacheGetOptions {
@@ -311,11 +338,10 @@ impl ProviderCache {
     ///
     /// * `key` - The cache key
     pub fn mark_request_complete(&self, key: &str) {
-        if let Ok(mut pending) = self.pending_requests.lock() {
-            if pending.remove(key).is_some() {
+        if let Ok(mut pending) = self.pending_requests.lock()
+            && pending.remove(key).is_some() {
                 crate::debug_log!("✅ [REQUEST-DEDUP] Request completed for key: {}", key);
             }
-        }
     }
 
     /// Get the number of components waiting for a pending request
@@ -390,20 +416,20 @@ impl ProviderCache {
         let cache_guard = self.cache.lock().ok()?;
         let entry = cache_guard.get(key)?;
 
-        // Check expiration first
-        if let Some(exp_duration) = options.expiration {
-            if entry.is_expired(exp_duration) {
-                drop(cache_guard);
-                // Remove expired entry
-                if let Ok(mut cache) = self.cache.lock() {
-                    cache.remove(key);
-                    crate::debug_log!(
-                        "🗑️ [CACHE-EXPIRATION] Removing expired cache entry for key: {}",
-                        key
-                    );
-                }
-                return None;
+        // Check expiration if configured
+        if let Some(exp_duration) = options.expiration
+            && entry.is_expired(exp_duration)
+        {
+            drop(cache_guard);
+            // If expired, remove it
+            if let Ok(mut cache) = self.cache.lock() {
+                cache.remove(key);
+                crate::debug_log!(
+                    "🗑️ [CACHE-EXPIRATION] Removing expired cache entry for key: {}",
+                    key
+                );
             }
+            return None;
         }
 
         // Get the data
@@ -565,6 +591,43 @@ impl ProviderCache {
             return true;
         }
         false
+    }
+
+    /// Retrieves a cached result by typed key.
+    ///
+    /// This is the type-safe version of `get`.
+    pub fn get_typed<T: Clone + Send + Sync + 'static>(&self, key: &TypedKey<T>) -> Option<T> {
+        self.get(&key.key)
+    }
+
+    /// Retrieves a cached result with configurable options using a typed key.
+    pub fn get_typed_with_options<T: Clone + Send + Sync + 'static>(
+        &self,
+        key: &TypedKey<T>,
+        options: CacheGetOptions,
+    ) -> Option<CacheGetResult<T>> {
+        self.get_with_options(&key.key, options)
+    }
+
+    /// Sets a value for a given typed key.
+    ///
+    /// This is the type-safe version of `set`.
+    pub fn set_typed<T: Clone + Send + Sync + PartialEq + 'static>(
+        &self,
+        key: &TypedKey<T>,
+        value: T,
+    ) -> bool {
+        self.set(key.key.clone(), value)
+    }
+
+    /// Removes a cached result by typed key.
+    pub fn remove_typed<T>(&self, key: &TypedKey<T>) -> bool {
+        self.remove(&key.key)
+    }
+
+    /// Invalidates a cached result by typed key.
+    pub fn invalidate_typed<T>(&self, key: &TypedKey<T>) {
+        self.invalidate(&key.key);
     }
 
     /// Removes a cached result by key.

@@ -36,10 +36,26 @@ pub trait ProviderCallback<M, E>: Clone + 'static {
     ///
     /// The default implementation hashes the function's type ID and the input parameters.
     fn cache_key(&self, input: &Self::Input) -> String {
+        format!("{}:{}", self.root_key(), self.args_key(input))
+    }
+
+    /// Generate a type-safe cache key for the given input
+    fn ty_key(&self, input: &Self::Input) -> crate::cache::TypedKey<Self::Output> {
+        crate::cache::TypedKey::new(self.cache_key(input))
+    }
+
+    /// Get the root key prefix for this provider function.
+    ///
+    /// This is used for invalidating all entries for a specific provider.
+    fn root_key(&self) -> String {
         let mut hasher = DefaultHasher::new();
-        // Hash the function type for uniqueness
         std::any::TypeId::of::<Self>().hash(&mut hasher);
-        // Hash the input parameters
+        format!("{:x}", hasher.finish())
+    }
+
+    /// Generate the arguments part of the key
+    fn args_key(&self, input: &Self::Input) -> String {
+        let mut hasher = DefaultHasher::new();
         input.hash(&mut hasher);
         format!("{:x}", hasher.finish())
     }
@@ -149,10 +165,6 @@ mod tests {
 
     async fn one_param(id: u32) -> Result<String, String> {
         Ok(format!("user_{}", id))
-    }
-
-    async fn two_params(id: u32, name: String) -> Result<String, String> {
-        Ok(format!("user_{}_{}", id, name))
     }
 
     #[test]

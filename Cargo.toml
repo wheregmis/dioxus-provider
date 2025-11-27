@@ -15,7 +15,7 @@ categories = ["gui", "asynchronous", "web-programming"]
 version = "0.2.1"
 
 [workspace]
-members = [".", "dioxus-provider-macros"]
+members = ["."]
 
 [features]
 default = ["tracing"]
@@ -31,12 +31,8 @@ dioxus = { version = "0.7.1", default-features = false, features = [
     "signals",
 ] }
 dioxus-stores = "0.7.1"
-# dioxus-provider-macros = { version = "0.1.1" }
-dioxus-provider-macros = { version = "0.2.1", path = "./dioxus-provider-macros" }
-futures = "0.3"
 tracing = { version = "0.1.41", optional = true }
 thiserror = "2.0.17"
-serde = { version = "1.0.226", features = ["derive"] }
 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -61,6 +57,7 @@ chrono = { version = "0.4.42", features = ["std"] }
 env_logger = "0.11"
 tracing-subscriber = "0.3.20"
 serde_json = { version = "1.0.145", features = ["std"] }
+serde = { version = "1.0.226", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # Desktop-only dependencies for examples

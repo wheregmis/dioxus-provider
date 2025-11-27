@@ -19,7 +19,6 @@
 /// // Simple types automatically satisfy these bounds:
 /// use dioxus_provider::prelude::*;
 ///
-/// #[provider]
 /// async fn fetch_user(user_id: u32) -> Result<String, String> {
 ///     // u32 implements ProviderParamBounds automatically
 ///     Ok(format!("User {}", user_id))
@@ -29,7 +28,6 @@
 /// #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 /// struct UserId(u32);
 ///
-/// #[provider]
 /// async fn fetch_user_custom(id: UserId) -> Result<String, String> {
 ///     // UserId now implements ProviderParamBounds
 ///     Ok(format!("User {}", id.0))
@@ -58,7 +56,6 @@ impl<T> ProviderParamBounds for T where
 /// use dioxus_provider::prelude::*;
 ///
 /// // Simple types work out of the box:
-/// #[provider]
 /// async fn fetch_count() -> Result<i32, String> {
 ///     Ok(42)
 /// }
@@ -70,7 +67,6 @@ impl<T> ProviderParamBounds for T where
 ///     name: String,
 /// }
 ///
-/// #[provider]
 /// async fn fetch_user(id: u32) -> Result<User, String> {
 ///     Ok(User { id, name: "Alice".to_string() })
 /// }
@@ -93,7 +89,6 @@ impl<T> ProviderOutputBounds for T where T: Clone + PartialEq + Send + Sync + 's
 /// use thiserror::Error;
 ///
 /// // String works as a simple error type:
-/// #[provider]
 /// async fn simple_provider() -> Result<String, String> {
 ///     Err("Something went wrong".to_string())
 /// }
@@ -107,7 +102,6 @@ impl<T> ProviderOutputBounds for T where T: Clone + PartialEq + Send + Sync + 's
 ///     NotFound,
 /// }
 ///
-/// #[provider]
 /// async fn typed_provider() -> Result<String, MyError> {
 ///     Err(MyError::NotFound)
 /// }

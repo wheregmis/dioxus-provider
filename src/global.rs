@@ -25,16 +25,10 @@ static GLOBAL_RUNTIME: OnceLock<ProviderRuntime> = OnceLock::new();
 
 /// Configuration for initializing the global provider system
 #[derive(Debug, Clone)]
+/// Configuration for the global provider runtime
+#[derive(Default)]
 pub struct ProviderConfig {
-    runtime_config: ProviderRuntimeConfig,
-}
-
-impl Default for ProviderConfig {
-    fn default() -> Self {
-        Self {
-            runtime_config: ProviderRuntimeConfig::new(),
-        }
-    }
+    pub(crate) runtime_config: ProviderRuntimeConfig,
 }
 
 impl ProviderConfig {
@@ -90,39 +84,6 @@ pub fn init() -> Result<(), GlobalProviderError> {
     ProviderConfig::new().with_dependency_injection().init()
 }
 
-/// Initialize the global provider management system (without dependency injection)
-///
-/// This should be called once at the start of your application,
-/// typically in your main function or app initialization.
-///
-/// ## Example
-///
-/// ```rust,no_run
-/// use dioxus::prelude::*;
-/// use dioxus_provider::global::init_global_providers;
-///
-/// fn main() {
-///     // Initialize global provider system
-///     init_global_providers();
-///     
-///     // Launch your app
-///     dioxus::launch(app);
-/// }
-///
-/// #[component]
-/// fn app() -> Element {
-///     rsx! {
-///         div { "Hello World!" }
-///     }
-/// }
-/// ```
-#[deprecated(
-    since = "0.1.0",
-    note = "Use init() or ProviderConfig::new().init() instead"
-)]
-pub fn init_global_providers() -> Result<(), GlobalProviderError> {
-    ProviderConfig::new().init()
-}
 
 /// Get the global provider cache instance
 ///

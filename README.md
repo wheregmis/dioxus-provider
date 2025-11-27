@@ -14,7 +14,7 @@
 
 ### Data Fetching & Caching
 - **Global Provider System**: Manage application-wide data without nesting context providers. Simplifies component architecture and avoids "provider hell."
-- **Declarative `#[provider]` Macro**: Define data sources with a simple attribute. The macro handles all the complex boilerplate for you.
+- **Simple Async Functions**: Define data sources using standard Rust `async` functions. No macros required!
 - **Intelligent Caching Strategies**:
     - **Stale-While-Revalidate (SWR)**: Serve stale data instantly while fetching fresh data in the background for a lightning-fast user experience.
     - **Time-to-Live (TTL) Cache Expiration**: Automatically evict cached data after a configured duration.
@@ -46,7 +46,6 @@ pub enum UserError {
     Suspended { reason: String },
 }
 
-#[provider]
 async fn fetch_user_profile(user_id: u32) -> Result<UserProfile, UserError> {
     // ...
     Ok(UserProfile)
@@ -59,7 +58,7 @@ async fn fetch_user_profile(user_id: u32) -> Result<UserProfile, UserError> {
 - **String Compatibility**: Seamless integration with existing String-based error handling.
 
 ### Mutation System
-- **Manual Implementation Pattern**: Define data mutations using simple struct implementations.
+- **Simple Async Mutations**: Define data mutations using standard `async` functions.
 - **Optimistic Updates**: Immediate UI feedback with automatic rollback on failure.
 - **Smart Cache Invalidation**: Automatically refresh related providers after successful mutations.
 - **Mutation State Tracking**: Built-in loading, success, and error states for mutations.
@@ -103,14 +102,13 @@ fn app() -> Element {
 
 ### 2. Create a Provider
 
-A "provider" is a function that fetches or computes a piece of data. Use the `#[provider]` attribute to turn any `async` function into a data source that can be used throughout your app.
+A "provider" is simply an `async` function that fetches or computes a piece of data. No macros or special traits are required!
 
 ```rust,no_run
 use dioxus_provider::prelude::*;
 use std::time::Duration;
 
 // This could be an API call, database query, etc.
-#[provider]
 async fn get_server_message() -> Result<String, String> {
     // Simulate a network request
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -127,27 +125,44 @@ The hook returns a `Signal<State<T, E>>`, which can be in one of three states: `
 ```rust,no_run
 use dioxus::prelude::*;
 use dioxus_provider::prelude::*;
-use dioxus::prelude::ReadableExt;
 
-#[provider]
 async fn get_server_message() -> Result<String, String> {
     Ok("Hello from the server!".to_string())
 }
 
 #[component]
 fn App() -> Element {
-    // Use the provider hook to get the data
-    let message = use_provider(get_server_message(), ());
+    // 1. Create the provider handle
+    let mut message_provider = use_provider(get_server_message);
+
+    // 2. Trigger the fetch (e.g., on mount)
+    use_effect(move || {
+        message_provider.call();
+    });
 
     rsx! {
         div {
             h1 { "Dioxus Provider Demo" }
-            // Pattern match on the state to render UI
-            match &*message.read() {
-                State::Loading { .. } => rsx! { div { "Loading..." } },
-                State::Success(data) => rsx! { div { "Server says: {data}" } },
-                State::Error(err) => rsx! { div { "Error: {err}" } },
+            
+            // 3. Access state and data
+    match message_provider.state() {
+        State::Pending => rsx! { div { "Loading..." } },
+        State::Ready => {
+            if let Some(Ok(data)) = message_provider.value() {
+                rsx! { div { "Server says: {data}" } }
+            } else {
+                rsx! { div { "No data" } }
             }
+        },
+        State::Error => {
+            if let Some(err) = message_provider.error() {
+                rsx! { div { "Error: {err}" } }
+            } else {
+                rsx! { div { "Unknown error" } }
+            }
+        },
+        _ => rsx! { div { "Idle" } }
+    }
         }
     }
 }
@@ -157,54 +172,29 @@ fn App() -> Element {
 
 The mutation system allows you to define data modification operations that automatically invalidate related provider caches, ensuring your UI stays in sync with server state.
 
-### 1. Basic Mutations (Macro-Based)
+### 1. Basic Mutations
 
-Create mutations using the `#[mutation]` attribute. Mutations automatically invalidate specified provider caches when they succeed.
+Use `use_mutation` with an `async` function. You can chain `.invalidates(provider)` to automatically refresh data when the mutation succeeds.
 
 ```rust,ignore
 use dioxus_provider::prelude::*;
 
-#[provider]
 async fn fetch_todos() -> Result<Vec<Todo>, String> { todo!() }
 
 #[derive(Clone, PartialEq)]
 struct Todo;
 
-// Define a mutation that invalidates the todo list when successful
-#[mutation(invalidates = [fetch_todos])]
 async fn add_todo(title: String) -> Result<Todo, String> {
     Ok(Todo)
 }
+
+// In component:
+// let mutation = use_mutation(add_todo).invalidates(fetch_todos);
 ```
 
 ### 2. Optimistic Updates
 
-For better UX, add an `optimistic` parameter to your mutation that updates the UI immediately and rolls back on failure:
-
-```rust,ignore
-use dioxus_provider::prelude::*;
-
-#[provider]
-async fn fetch_todos() -> Result<Vec<Todo>, String> { todo!() }
-
-#[derive(Clone, PartialEq)]
-struct Todo {
-    id: u32,
-    completed: bool,
-}
-
-#[mutation(
-    invalidates = [fetch_todos],
-    optimistic = |todos: &mut Vec<Todo>, id: &u32| {
-        if let Some(todo) = todos.iter_mut().find(|t| t.id == *id) {
-            todo.completed = !todo.completed;
-        }
-    }
-)]
-async fn toggle_todo(id: u32) -> Result<Vec<Todo>, String> {
-    Ok(vec![])
-}
-```
+For better UX, you can configure optimistic updates that update the UI immediately and roll back on failure. Note: The optimistic update API is currently being refined for the hook-based approach.
 
 ### 3. Multiple Cache Invalidation
 
@@ -213,19 +203,21 @@ Mutations can invalidate multiple provider caches at once:
 ```rust,ignore
 use dioxus_provider::prelude::*;
 
-#[provider]
 async fn fetch_todos() -> Result<Vec<Todo>, String> { todo!() }
 
-#[provider]
 async fn fetch_stats() -> Result<String, String> { todo!() }
 
 #[derive(Clone, PartialEq)]
 struct Todo;
 
-#[mutation(invalidates = [fetch_todos, fetch_stats])]
 async fn remove_todo(id: u32) -> Result<(), String> {
     Ok(())
 }
+
+// In component:
+// let mutation = use_mutation(remove_todo)
+//     .invalidates(fetch_todos)
+//     .invalidates(fetch_stats);
 ```
 
 ## New Features in Latest Release
@@ -246,25 +238,14 @@ struct Settings;
 #[derive(Clone, PartialEq)]
 struct UserProfile { user: User, permissions: Permissions, settings: Settings }
 
-#[provider]
 async fn fetch_user(_id: u32) -> Result<User, ProviderError> { Ok(User) }
 
-#[provider]
 async fn fetch_permissions(_id: u32) -> Result<Permissions, ProviderError> { Ok(Permissions) }
 
-#[provider]
 async fn fetch_settings(_id: u32) -> Result<Settings, ProviderError> { Ok(Settings) }
 
-// These providers will run in parallel
-#[provider(compose = [fetch_user, fetch_permissions, fetch_settings])]
-async fn fetch_complete_profile(user_id: u32) -> Result<UserProfile, ProviderError> {
-    // The macro generates parallel execution
-    let user = fetch_user(user_id).await?;
-    let permissions = fetch_permissions(user_id).await?;
-    let settings = fetch_settings(user_id).await?;
-    
-    Ok(UserProfile { user, permissions, settings })
-}
+// Composition is now done via hooks or manual async aggregation
+// (New composition API coming soon)
 ```
 
 ### Structured Error Handling
@@ -280,22 +261,29 @@ Providers can take arguments to fetch dynamic data. For example, fetching a user
 ```rust,no_run
 use dioxus::prelude::*;
 use dioxus_provider::prelude::*;
-use dioxus::prelude::ReadableExt;
 
-#[provider]
 async fn fetch_user(user_id: u32) -> Result<String, String> {
     Ok(format!("User data for ID: {}", user_id))
 }
 
 #[component]
 fn UserProfile(user_id: u32) -> Element {
-    // Pass arguments as a tuple
-    let user = use_provider(fetch_user(), (user_id,));
+    // 1. Create provider
+    let mut user_provider = use_provider(fetch_user);
 
-    match &*user.read() {
-        State::Success(data) => rsx!{ div { "{data}" } },
-        // ... other states
-        _ => rsx!{ div { "Loading user..." } }
+    // 2. Fetch when user_id changes
+    use_effect(move || {
+        user_provider.call(user_id);
+    });
+
+    rsx! {
+        div {
+            if user_provider.pending() {
+                "Loading user..."
+            } else if let Some(Ok(data)) = user_provider.value() {
+                "{data}"
+            }
+        }
     }
 }
 ```
@@ -309,10 +297,14 @@ fn UserProfile(user_id: u32) -> Element {
 ```rust,ignore
 use dioxus_provider::prelude::*;
 
-#[provider(stale_time = "10s")]
 async fn get_dashboard_data() -> Result<String, String> {
     Ok("Dashboard data".to_string())
 }
+
+// In component:
+// let mut data = use_provider(get_dashboard_data)
+//     .stale_time(Duration::from_secs(10));
+// data.call();
 ```
 
 #### Cache Expiration (TTL)
@@ -322,11 +314,14 @@ async fn get_dashboard_data() -> Result<String, String> {
 ```rust,ignore
 use dioxus_provider::prelude::*;
 
-// This data will be removed from cache after 5 minutes of inactivity
-#[provider(cache_expiration = "5m")]
 async fn get_analytics() -> Result<String, String> {
     Ok("Analytics report".to_string())
 }
+
+// In component:
+// let mut data = use_provider(get_analytics)
+//     .cache_expiration(Duration::from_secs(300));
+// data.call();
 ```
 
 ### Manual Cache Invalidation
@@ -337,19 +332,19 @@ You can manually invalidate a provider's cache to force a re-fetch.
 use dioxus::prelude::*;
 use dioxus_provider::prelude::*;
 
-#[provider]
 async fn fetch_user(_id: u32) -> Result<String, String> {
     Ok("User".to_string())
 }
 
 #[component]
 fn UserDashboard() -> Element {
-    let user_data = use_provider(fetch_user(), (1,));
-    let invalidate_user = use_invalidate_provider(fetch_user(), (1,));
+    let mut user_provider = use_provider(fetch_user);
+    
+    use_effect(move || { user_provider.call(1); });
 
     rsx! {
         button {
-            onclick: move |_| invalidate_user(),
+            onclick: move |_| user_provider.invalidate(),
             "Refresh User"
         }
     }
@@ -380,10 +375,13 @@ fn App() -> Element {
 You can fine-tune cache behaviour per provider using lifecycle controls:
 
 ```rust,ignore
-#[provider(lifecycle(interval = "4s", stale_time = "6s", cache_expiration = "30s"))]
-async fn fetch_dashboard(user_id: u32) -> Result<UserDashboard, Error> {
-    // ...
-}
+// Configure lifecycle in the component
+let mut dashboard = use_provider(fetch_dashboard)
+    .interval(Duration::from_secs(4))
+    .stale_time(Duration::from_secs(6))
+    .cache_expiration(Duration::from_secs(30));
+
+dashboard.call(user_id);
 ```
 
 If omitted, no background tasks run – providers simply fetch when requested. Combine interval polling, SWR, and TTL as needed.
@@ -391,40 +389,10 @@ If omitted, no background tasks run – providers simply fetch when requested. C
 For example implementations, see `examples/comprehensive_demo.rs`, which configures interval refresh, SWR, and cache expiration on different providers.
 
 
-## State Combinators
-
-`State` now supports combinator methods for ergonomic state transformations:
-
-```rust
-use dioxus_provider::prelude::*;
-
-let state: State<u32, String> = State::Success(42);
-let mapped = state.clone().map(|v| v.to_string()); // State<String, String>
-let state2: State<u32, String> = State::Success(42);
-let mapped_err = state2.clone().map_err(|e| format!("error: {e}"));
-let state3: State<u32, String> = State::Success(42);
-let chained = state3.and_then(|v| if v > 0 { State::Success(v * 2) } else { State::Error("zero".into()) });
-```
-
-See the API docs for more details.
 
 ## Examples Gallery
 
 Explore the full power of `dioxus-provider` with these real-world, ready-to-run examples in the [`examples/`](./examples/) directory:
-
-| Example | Description |
-|---------|-------------|
-| [`comprehensive_demo.rs`](./examples/comprehensive_demo.rs) | **All-in-one showcase**: Demonstrates lifecycle controls (interval refresh, SWR, cache expiration), global providers, error handling, parameterized providers, and more. |
-| [`composable_provider_demo.rs`](./examples/composable_provider_demo.rs) | **Composable Providers**: Parallel provider execution, type-safe result composition, and error aggregation. |
-| [`dependency_injection_demo.rs`](./examples/dependency_injection_demo.rs) | **Dependency Injection**: Macro-based DI for API clients, databases, and more. |
-| [`todo_app.rs`](./examples/todo_app.rs) | **Mutations**: End-to-end todo list with invalidation and cache-aware mutations. |
-| [`optimistic_minimal.rs`](./examples/optimistic_minimal.rs) | **Optimistic Mutations (Experimental)**: Tiny example showing optimistic updates and rollback. |
-| [`cache_expiration_test.rs`](./examples/cache_expiration_test.rs) | **Cache Expiration Test**: Verifies that cache expiration triggers loading and refetch. |
-| [`suspense_demo.rs`](./examples/suspense_demo.rs) | **Suspense Integration**: Shows how to use Dioxus SuspenseBoundary with async providers. |
-| [`provider_state_combinators.rs`](./examples/provider_state_combinators.rs) | **ProviderState Combinators**: Practical use of `.map`, `.map_err`, and `.and_then` for ergonomic state transformations in UI. |
-
-> **Tip:**
-> Run any example with  
 > `cargo run --example <example_name>`  
 > (e.g., `cargo run --example comprehensive_demo`)
 
@@ -479,19 +447,23 @@ Looking to add beautiful animations to your Dioxus application? Check out **[dio
 use dioxus::prelude::*;
 use dioxus_provider::prelude::*;
 
-#[provider]
 async fn fetch_user(_id: u32) -> Result<String, String> { Ok("User".to_string()) }
 
 #[component]
 fn AnimatedUserCard(user_id: u32) -> Element {
     // Data fetching with dioxus-provider
-    let user_data = use_provider(fetch_user(), (user_id,));
+    let mut user_provider = use_provider(fetch_user);
+    use_effect(move || { user_provider.call(user_id); });
     
-    match &*user_data.read() {
-        State::Success(user) => rsx! {
-            div {
-                "{user}"
-            }
+    match user_provider.state() {
+        State::Ready => {
+             if let Some(Ok(user)) = user_provider.value() {
+                rsx! {
+                    div { "{user}" }
+                }
+             } else {
+                 rsx! { div { "Error" } }
+             }
         },
         _ => rsx! { div { "Loading..." } }
     }

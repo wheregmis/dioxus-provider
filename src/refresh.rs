@@ -117,15 +117,13 @@ impl RefreshRegistry {
         }
 
         // Mark all reactive contexts as dirty
-        if let Ok(contexts) = self.reactive_contexts.lock() {
-            if let Some(key_contexts) = contexts.get(key) {
-                if let Ok(context_set) = key_contexts.lock() {
+        if let Ok(contexts) = self.reactive_contexts.lock()
+            && let Some(key_contexts) = contexts.get(key)
+                && let Ok(context_set) = key_contexts.lock() {
                     for reactive_context in context_set.iter() {
                         reactive_context.mark_dirty();
                     }
                 }
-            }
-        }
     }
 
     /// Clear all cached data and trigger refresh for all providers
