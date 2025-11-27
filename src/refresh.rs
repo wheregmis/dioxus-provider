@@ -107,7 +107,7 @@ impl RefreshRegistry {
 
     /// Unsubscribe a component scope from refresh events
     pub fn unsubscribe(&self, key: &str, scope_id: ScopeId) {
-        if let Ok(mut subscribers) = self.subscribers.lock() {
+        if let Ok(subscribers) = self.subscribers.lock() {
             if let Some(key_subscribers) = subscribers.get(key) {
                 if let Ok(mut subscriber_set) = key_subscribers.lock() {
                     subscriber_set.remove(&scope_id);

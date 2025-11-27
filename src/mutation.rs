@@ -445,7 +445,12 @@ where
     // Use store for fine-grained reactivity
     let store: Store<MutationData<O, E>> = use_store(MutationData::default);
     let task_signal: Signal<Option<Task>> = use_signal(|| None);
-    let invalidation_keys: Signal<Vec<String>> = use_signal(Vec::new);
+    let mut invalidation_keys: Signal<Vec<String>> = use_signal(Vec::new);
+    
+    // Clear keys on every render so builder pattern doesn't duplicate them
+    // explicitly ignoring the return value to avoid warning
+    let _ = invalidation_keys.write().clear();
+
     let optimistic_fn: Signal<Option<Box<dyn Fn(&F::Input, &ProviderCache) -> Option<O> + 'static>>> = use_signal(|| None);
 
     // Get global cache and refresh registry
@@ -555,34 +560,14 @@ where
                             };
 
             for k in keys_to_remove {
-                let has_optimistic = optimistic_fn.read().is_some();
-                if has_optimistic {
-                     crate::debug_log!("🔄 [MUTATION] Skipping prefix invalidation for optimistic update: {}", k);
-                     refresh_registry.notify_update(&k);
-                } else {
-                    cache.invalidate(&k);
-                    refresh_registry.trigger_refresh(&k);
-                }
+                cache.invalidate(&k);
+                refresh_registry.trigger_refresh(&k);
             }
                         } else {
                             // Exact key invalidation
-                            // If we have an optimistic update, we skip invalidation to prevent blinking.
-                            // The optimistic update should have already set the cache to a "good enough" state.
-                            // Ideally, we would update the cache with the real server result here,
-                            // but we don't know which key corresponds to the result type generically.
-                // If we have an optimistic update, we skip standard invalidation to avoid the blink.
-                // BUT, we must still notify components that the data has changed so they re-render
-                // with the new optimistic data we just put in the cache.
-                let has_optimistic = optimistic_fn.read().is_some();
-                if has_optimistic {
-                    crate::debug_log!("🔄 [MUTATION] Skipping invalidation for optimistic update to prevent blink: {}", key);
-                    // Notify listeners that data changed, but don't trigger a "refresh" (fetch)
-                    refresh_registry.notify_update(key);
-                } else {
-                    cache.invalidate(key);
-                    refresh_registry.trigger_refresh(key);
-                    crate::debug_log!("🔄 [MUTATION] Invalidated provider cache: {}", key);
-                }
+                            cache.invalidate(key);
+                            refresh_registry.trigger_refresh(key);
+                            crate::debug_log!("🔄 [MUTATION] Invalidated provider cache: {}", key);
                         }
                     }
                 });

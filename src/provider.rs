@@ -104,6 +104,8 @@ pub struct Provider<I: 'static, O: Clone + PartialEq + 'static, E: Clone + Parti
     /// Function to generate cache keys
     #[allow(clippy::type_complexity)]
     pub(crate) cache_key_fn: Signal<Box<dyn Fn(&I) -> String + 'static>>,
+    /// Last input used to call the provider (for auto-refresh)
+    pub(crate) last_input: Signal<Option<I>>,
     /// Cache reference
     pub(crate) cache: Signal<ProviderCache>,
     /// Refresh registry reference
@@ -283,6 +285,7 @@ impl<O: Clone + Send + Sync + PartialEq + 'static, E: Clone + Send + Sync + Part
 {
     /// Call the provider with no arguments.
     pub fn call(&mut self) {
+        self.last_input.set(Some(()));
         let cache_key = (self.cache_key_fn.read())(&());
         self.store.cache_key().set(Some(cache_key.clone()));
         let should_fetch = check_cache_and_set_state(
@@ -308,6 +311,7 @@ impl<
     /// Call the provider with one argument.
     pub fn call(&mut self, a: A) {
         let input = (a.clone(),);
+        self.last_input.set(Some(input.clone()));
         let cache_key = (self.cache_key_fn.read())(&input);
         self.store.cache_key().set(Some(cache_key.clone()));
         let should_fetch = check_cache_and_set_state(
@@ -501,6 +505,7 @@ where
     // Use store for fine-grained reactivity
     let store: Store<ProviderData<O, E>> = use_store(ProviderData::default);
     let task: Signal<Option<Task>> = use_signal(|| None);
+    let last_input: Signal<Option<F::Input>> = use_signal(|| None);
 
     // Get global cache and refresh registry
     let (cache_val, refresh_registry_val) = get_global_runtime_handles()
@@ -579,25 +584,37 @@ where
     // Sync with global cache on every render (if triggered by refresh_trigger)
     // This ensures we pick up optimistic updates immediately.
     // We use a separate block to ensure all read locks are dropped before we try to write.
-    let update_to_apply = {
+    let (update_to_apply, should_refetch) = {
         let cache_key_signal = store.cache_key();
         let key_read = cache_key_signal.read();
+
         if let Some(key) = key_read.as_ref() {
             let cache_read = cache.read();
-            if let Some(Ok(data)) = cache_read.get::<Result<O, E>>(key) {
-                // Check if we need to update
-                let value_signal = store.value();
-                let value_read = value_signal.read();
-                if value_read.as_ref() != Some(&data) {
-                    Some(data)
+            if let Some(result) = cache_read.get::<Result<O, E>>(key) {
+                // Check if we need to update from cache
+                if let Ok(data) = result {
+                    let value_signal = store.value();
+                    let value_read = value_signal.read();
+                    if value_read.as_ref() != Some(&data) {
+                        (Some(data), false)
+                    } else {
+                        (None, false)
+                    }
                 } else {
-                    None
+                    (None, false)
                 }
             } else {
-                None
+                // Cache miss - check if we were previously Ready/Error and now missing data
+                // This implies invalidation happened, so we should refetch if we have last_input
+                let state = store.state().cloned();
+                if (state == State::Ready || state == State::Error) && last_input.read().is_some() {
+                    (None, true)
+                } else {
+                    (None, false)
+                }
             }
         } else {
-            None
+            (None, false)
         }
     };
 
@@ -606,6 +623,11 @@ where
         store.value().set(Some(data));
         store.state().set(State::Ready);
         store.error().set(None);
+    } else if should_refetch {
+        crate::debug_log!("🔄 [REFETCH] Auto-refetching provider due to invalidation",);
+        if let Some(input) = last_input.read().clone() {
+            (callback.read())(input);
+        }
     }
 
     Provider {
@@ -613,6 +635,7 @@ where
         task,
         callback,
         cache_key_fn,
+        last_input,
         cache,
         refresh_registry,
         _phantom: PhantomData,
