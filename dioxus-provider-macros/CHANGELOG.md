@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-macros-v0.2.1...dioxus-provider-macros-v0.3.0) - 2026-06-08
+
+### <!-- 3 -->Other
+
+- more cleanup
+- Refactor mutation and provider function signatures to conditionally include Send bound for non-WASM targets. This update enhances the handling of async functions by ensuring compatibility with WASM while maintaining the necessary Send trait for other environments.
+- Refactor async function signatures to conditionally include Send bound for non-WASM targets. This change ensures compatibility with WASM by applying the Send trait only when not targeting the WASM environment.
+
 ## [0.1.3](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-macros-v0.1.2...dioxus-provider-macros-v0.1.3) - 2025-10-29
 
 ### <!-- 3 -->Other

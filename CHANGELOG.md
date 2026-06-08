@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-v0.2.1...dioxus-provider-v0.3.0) - 2026-06-08
+
+### <!-- 2 -->Fixes
+
+- fix wasm
+
+### <!-- 3 -->Other
+
+- dioxus bump
+- more cleanups
+- more cleanups
+- more cleanup
+- small cleanup
+- more tweaks
+- remove resubs spam
+- Revert "Reapply "These should be not send""
+- Add request deduplication to ProviderCache
+- Enhance mutation handling with atomic flags to prevent race conditions and ensure cleanup on panic. Update provider ID generation to include parameter type for unique key creation and implement cache key cleanup for previous tasks.
+- dioxus version bump
+
 ## [0.2.1](https://github.com/wheregmis/dioxus-provider/compare/dioxus-provider-v0.2.0...dioxus-provider-v0.2.1) - 2025-10-31
 
 ### <!-- 3 -->Other
